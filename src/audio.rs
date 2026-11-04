@@ -1,10 +1,12 @@
 //! Mac audio in and out: the microphone feeds the listener, the speaker plays the voices.
+//! Each device runs on its own thread, because audio streams can't move between threads
+//! on every platform; the handles returned here can.
 
 use anyhow::{Context, Result, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc as sync_mpsc};
 use tokio::sync::mpsc;
 
 /// What's left to play, shared with the audio thread. Clones share one speaker.
@@ -36,8 +38,24 @@ impl Speaker {
     }
 }
 
-/// Opens the default output device. Sound plays for as long as the stream is kept alive.
-pub fn speaker() -> Result<(cpal::Stream, Speaker)> {
+/// Opens the default output device for the rest of the program's life.
+pub fn speaker() -> Result<Speaker> {
+    let (ready_tx, ready_rx) = sync_mpsc::channel();
+    std::thread::spawn(move || match open_speaker() {
+        Ok((_stream, speaker)) => {
+            ready_tx.send(Ok(speaker)).ok();
+            loop {
+                std::thread::park();
+            }
+        }
+        Err(e) => {
+            ready_tx.send(Err(e)).ok();
+        }
+    });
+    ready_rx.recv().context("the speaker thread stopped")?
+}
+
+fn open_speaker() -> Result<(cpal::Stream, Speaker)> {
     let device = cpal::default_host()
         .default_output_device()
         .context("no speaker or headphones found")?;
@@ -76,9 +94,34 @@ fn output<T: SizedSample + FromSample<f32>>(
     )?)
 }
 
-/// Opens the default microphone and sends mono 16-bit frames to `tx`. Returns the stream,
-/// which must be kept alive to keep listening, and its sample rate.
-pub fn mic(tx: mpsc::UnboundedSender<Vec<i16>>) -> Result<(cpal::Stream, u32)> {
+/// The open microphone. It closes when this is dropped.
+pub struct Mic {
+    /// Samples per second of the frames it sends.
+    pub rate: u32,
+    _close: sync_mpsc::Sender<()>,
+}
+
+/// Opens the default microphone and sends mono 16-bit frames to `tx` until the `Mic` is dropped.
+pub fn mic(tx: mpsc::UnboundedSender<Vec<i16>>) -> Result<Mic> {
+    let (ready_tx, ready_rx) = sync_mpsc::channel();
+    let (close_tx, close_rx) = sync_mpsc::channel::<()>();
+    std::thread::spawn(move || match open_mic(tx) {
+        Ok((_stream, rate)) => {
+            ready_tx.send(Ok(rate)).ok();
+            close_rx.recv().ok(); // returns once the Mic is dropped
+        }
+        Err(e) => {
+            ready_tx.send(Err(e)).ok();
+        }
+    });
+    let rate = ready_rx.recv().context("the microphone thread stopped")??;
+    Ok(Mic {
+        rate,
+        _close: close_tx,
+    })
+}
+
+fn open_mic(tx: mpsc::UnboundedSender<Vec<i16>>) -> Result<(cpal::Stream, u32)> {
     let device = cpal::default_host()
         .default_input_device()
         .context("no microphone found")?;

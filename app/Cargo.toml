@@ -1,0 +1,15 @@
+[package]
+name = "voice-team"
+version = "0.1.0"
+edition = "2024"
+description = "The Voice Team Mac app: chat with your team, with voice one click away"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+voice-bots = { path = ".." }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+dotenvy = "0.15"

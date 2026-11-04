@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Team</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="side">
+    <div class="brand">Voice Team</div>
+    <nav class="nav" aria-label="Chats">
+      <ul id="main-list" class="list"></ul>
+      <div class="section">
+        <h2>Your bots</h2>
+        <button id="new-bot" class="plus" aria-label="Create a bot" title="Create a bot">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <ul id="bot-list" class="list"></ul>
+      <div class="section">
+        <h2>Group chats</h2>
+        <button id="new-group" class="plus" aria-label="Start a group chat" title="Start a group chat">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <ul id="group-list" class="list"></ul>
+    </nav>
+    <div class="side-foot">
+      <p id="chat-status" class="light">Chat</p>
+      <p id="voice-status" class="light">Voice</p>
+    </div>
+  </aside>
+
+  <main id="main" class="empty">
+    <header class="top">
+      <span id="top-avatars" class="stack"></span>
+      <div class="top-text">
+        <div id="top-title" class="top-title"></div>
+        <div id="top-sub" class="top-sub"></div>
+      </div>
+      <button id="clear" class="icon-btn" aria-label="Clear this chat" title="Clear this chat">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      </button>
+    </header>
+
+    <div id="threads" class="threads"></div>
+
+    <section class="hero">
+      <h1 id="hero-title">What can your team do for you?</h1>
+      <p id="hero-note" class="hero-note"></p>
+    </section>
+
+    <div class="dock">
+      <div id="voicebar" class="voicebar" hidden>
+        <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span id="voice-state" class="voice-state" aria-live="polite">Listening</span>
+        <button id="stop" class="chip">Stop</button>
+        <button id="end-voice" class="chip">End voice</button>
+      </div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Message" aria-label="Message"></textarea>
+        <button id="mic" type="button" class="icon-btn" aria-label="Start voice" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <button id="send" type="submit" class="send-btn" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </form>
+      <p class="hint">Enter sends · Shift+Enter adds a line · Esc stops a bot</p>
+    </div>
+  </main>
+
+  <dialog id="bot-dialog" aria-labelledby="bot-title">
+    <form id="bot-form" class="sheet" novalidate>
+      <h2 id="bot-title">Create a bot</h2>
+      <label>Name<input name="name" maxlength="24" placeholder="Ava" autocomplete="off"></label>
+      <label>What it's for<input name="role" maxlength="80" placeholder="Plans trips and finds deals" autocomplete="off"></label>
+      <label>Personality<input name="personality" maxlength="80" placeholder="Upbeat and practical" autocomplete="off"></label>
+      <label>Voice<select id="voice-select" name="voice"></select></label>
+      <label>Speaking speed <output id="speed-out">1.0×</output>
+        <input name="speed" type="range" min="0.7" max="1.2" step="0.05" value="1">
+      </label>
+      <p id="bot-error" class="form-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" class="chip" data-close>Cancel</button>
+        <button type="submit" class="primary">Create bot</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="group-dialog" aria-labelledby="group-title">
+    <form id="group-form" class="sheet" novalidate>
+      <h2 id="group-title">Start a group chat</h2>
+      <label>Name<input name="name" maxlength="32" placeholder="Brain trust" autocomplete="off"></label>
+      <fieldset>
+        <legend>Who's in it (two or more)</legend>
+        <div id="group-bots" class="checks"></div>
+      </fieldset>
+      <p id="group-error" class="form-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" class="chip" data-close>Cancel</button>
+        <button type="submit" class="primary">Start group</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

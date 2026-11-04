@@ -24,6 +24,36 @@ impl Voices {
         })
     }
 
+    /// The voices this account can use, as (id, name).
+    pub async fn list(&self) -> Result<Vec<(String, String)>> {
+        let resp = self
+            .http
+            .get("https://api.elevenlabs.io/v1/voices")
+            .header("xi-api-key", &self.key)
+            .send()
+            .await
+            .context("calling ElevenLabs")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            bail!(
+                "ElevenLabs {status}: {}",
+                resp.text().await.unwrap_or_default()
+            );
+        }
+        let body: serde_json::Value = resp.json().await?;
+        Ok(body["voices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| {
+                Some((
+                    v["voice_id"].as_str()?.to_string(),
+                    v["name"].as_str()?.to_string(),
+                ))
+            })
+            .collect())
+    }
+
     /// Speaks one sentence, handing each chunk of samples to `play` as it arrives.
     /// `previous` is the sentence before it, so the voice keeps its flow.
     pub async fn speak(

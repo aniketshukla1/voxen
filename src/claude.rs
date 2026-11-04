@@ -30,12 +30,17 @@ impl Claude {
             .context("ANTHROPIC_API_KEY is not set (copy .env.example to .env)")?;
         let base = std::env::var("ANTHROPIC_BASE_URL")
             .unwrap_or_else(|_| "https://api.anthropic.com".into());
-        Ok(Self {
+        let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| "claude-opus-5-5".into());
+        Ok(Self::new(key, &base, model))
+    }
+
+    pub fn new(key: impl Into<String>, base_url: &str, model: impl Into<String>) -> Self {
+        Self {
             http: reqwest::Client::new(),
-            key,
-            url: format!("{}/v1/messages", base.trim_end_matches('/')),
-            model: std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| "claude-opus-5-5".into()),
-        })
+            key: key.into(),
+            url: format!("{}/v1/messages", base_url.trim_end_matches('/')),
+            model: model.into(),
+        }
     }
 
     /// Streams the reply to one user message. Low effort keeps spoken replies quick.
