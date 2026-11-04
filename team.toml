@@ -1,6 +1,6 @@
-# Your bots. The app adds new bots and group chats to this file; you can edit it by hand too.
+# Your bots. Voxen adds new bots and group chats to this file; you can edit it by hand too.
 # voice = an ElevenLabs voice id (Voice Library → pick a voice → copy its id).
-# speed = 0.7 (slower) to 1.2 (faster).
+# speed = 0.7 (slower) to 1.2 (faster). color = the bot's colour in the app.
 
 main = "Maya"
 
@@ -10,6 +10,7 @@ role = "Your main assistant, for anything"
 personality = "Warm, quick, a little funny"
 voice = "EXAVITQu4vr4xnSDxMaL"
 speed = 1.0
+color = "#8B7CFF"
 
 [[bot]]
 name = "Sam"
@@ -17,6 +18,7 @@ role = "Researcher: facts, comparisons, numbers"
 personality = "Calm and precise"
 voice = "JBFqnCBsd6RMkjVDRZzb"
 speed = 1.05
+color = "#36D6B4"
 
 [[group]]
 name = "Brain trust"

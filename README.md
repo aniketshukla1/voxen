@@ -1,16 +1,17 @@
-# voice-bots
+# Voxen
 
-A voice call with a team of AI people. Talk (or type), and the right bot answers
-out loud in its own voice. Plan: [CAPABILITY-MAP.md](CAPABILITY-MAP.md).
+Your team of voices. Talk to one of your bots, or to all of them in a group chat, and they
+answer out loud in their own voices. Plan: [CAPABILITY-MAP.md](CAPABILITY-MAP.md).
+Identity: [docs/brand-guidelines.md](docs/brand-guidelines.md).
 
 ## Open the app
 
 ```
-cargo run -p voice-team
+cargo run -p voxen
 ```
 
-The window opens even without keys and says what's missing. Typing needs only the Claude key;
-the mic button (voice) needs all three.
+The window opens even without keys and walks you through setup: paste your keys there and
+Voxen restarts with them. Typing needs only the Claude key; voice needs all three.
 
 ## Keys (about 10 minutes)
 

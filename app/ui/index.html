@@ -3,104 +3,149 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Voice Team</title>
+  <title>Voxen</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <aside class="side">
-    <div class="brand">Voice Team</div>
-    <nav class="nav" aria-label="Chats">
-      <ul id="main-list" class="list"></ul>
-      <div class="section">
-        <h2>Your bots</h2>
-        <button id="new-bot" class="plus" aria-label="Create a bot" title="Create a bot">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-      </div>
-      <ul id="bot-list" class="list"></ul>
-      <div class="section">
-        <h2>Group chats</h2>
-        <button id="new-group" class="plus" aria-label="Start a group chat" title="Start a group chat">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-      </div>
-      <ul id="group-list" class="list"></ul>
-    </nav>
-    <div class="side-foot">
-      <p id="chat-status" class="light">Chat</p>
-      <p id="voice-status" class="light">Voice</p>
+  <nav id="rail" class="rail" aria-label="Rooms">
+    <div class="rail-head" data-tauri-drag-region>
+      <span id="mark" class="mark" aria-hidden="true"></span>
+      <span class="wordmark">voxen</span>
     </div>
-  </aside>
-
-  <main id="main" class="empty">
-    <header class="top">
-      <span id="top-avatars" class="stack"></span>
-      <div class="top-text">
-        <div id="top-title" class="top-title"></div>
-        <div id="top-sub" class="top-sub"></div>
-      </div>
-      <button id="clear" class="icon-btn" aria-label="Clear this chat" title="Clear this chat">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+    <p class="rail-label">Rooms</p>
+    <ul id="rooms" class="rooms"></ul>
+    <div class="rail-foot">
+      <button id="new-bot" class="rail-btn" type="button" aria-keyshortcuts="Meta+N">
+        <span class="ico"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span class="lbl"><b>New voice</b><small>Make a bot</small></span>
+        <kbd class="kbd">⌘N</kbd>
       </button>
+      <button id="new-group" class="rail-btn" type="button" aria-keyshortcuts="Meta+Shift+N">
+        <span class="ico"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3.5"/><circle cx="16" cy="11" r="3"/><path d="M3 19c.8-3 3.2-4.5 6-4.5s5.2 1.5 6 4.5M15 15.5c2.3 0 4.2 1.2 5 3.5"/></svg></span>
+        <span class="lbl"><b>New room</b><small>Bots talk it over</small></span>
+        <kbd class="kbd">⇧⌘N</kbd>
+      </button>
+      <button id="setup" class="rail-btn" type="button">
+        <span class="ico"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M17 6l3 3"/></svg><i class="dot"></i></span>
+        <span class="lbl"><b id="setup-title">Finish setup</b><small id="setup-sub">Add your keys</small></span>
+      </button>
+    </div>
+  </nav>
+
+  <main id="stage" class="stage quiet">
+    <header class="stage-top" data-tauri-drag-region>
+      <div class="room" data-tauri-drag-region>
+        <span id="room-title" class="room-title"></span>
+        <span id="room-sub" class="room-sub"></span>
+      </div>
+      <div class="top-actions">
+        <button id="clear" class="ghost" type="button">Clear</button>
+      </div>
     </header>
 
-    <div id="threads" class="threads"></div>
+    <section id="cast" class="cast" aria-label="Voices in this room"></section>
+    <div id="baton" class="baton" aria-hidden="true"></div>
 
-    <section class="hero">
-      <h1 id="hero-title">What can your team do for you?</h1>
-      <p id="hero-note" class="hero-note"></p>
+    <section id="scripts" class="scripts"></section>
+
+    <section class="welcome">
+      <p id="welcome-line" class="welcome-line"></p>
+      <div id="suggestions" class="suggestions"></div>
+      <button id="demo" class="demo-link" type="button">or watch a demo</button>
+      <p id="note" class="note" role="status"></p>
     </section>
 
-    <div class="dock">
-      <div id="voicebar" class="voicebar" hidden>
-        <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-        <span id="voice-state" class="voice-state" aria-live="polite">Listening</span>
-        <button id="stop" class="chip">Stop</button>
-        <button id="end-voice" class="chip">End voice</button>
-      </div>
+    <footer class="dock">
+      <span id="you" class="you-print" aria-hidden="true"></span>
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" placeholder="Message" aria-label="Message"></textarea>
-        <button id="mic" type="button" class="icon-btn" aria-label="Start voice" aria-pressed="false">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-        </button>
-        <button id="send" type="submit" class="send-btn" aria-label="Send">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        <textarea id="input" rows="1" placeholder="Talk, or type…" aria-label="Message"></textarea>
+        <button id="send" class="send" type="submit" aria-label="Send">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
         </button>
       </form>
-      <p class="hint">Enter sends · Shift+Enter adds a line · Esc stops a bot</p>
-    </div>
+      <button id="voice" class="voice-btn" type="button" aria-pressed="false" aria-label="Turn voice on" aria-keyshortcuts="Meta+D" title="Voice (⌘D)">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+    </footer>
+    <p id="status" class="status" aria-live="polite">Voice is off</p>
   </main>
 
-  <dialog id="bot-dialog" aria-labelledby="bot-title">
-    <form id="bot-form" class="sheet" novalidate>
-      <h2 id="bot-title">Create a bot</h2>
-      <label>Name<input name="name" maxlength="24" placeholder="Ava" autocomplete="off"></label>
-      <label>What it's for<input name="role" maxlength="80" placeholder="Plans trips and finds deals" autocomplete="off"></label>
-      <label>Personality<input name="personality" maxlength="80" placeholder="Upbeat and practical" autocomplete="off"></label>
-      <label>Voice<select id="voice-select" name="voice"></select></label>
-      <label>Speaking speed <output id="speed-out">1.0×</output>
-        <input name="speed" type="range" min="0.7" max="1.2" step="0.05" value="1">
-      </label>
-      <p id="bot-error" class="form-error" role="alert"></p>
-      <div class="sheet-actions">
-        <button type="button" class="chip" data-close>Cancel</button>
-        <button type="submit" class="primary">Create bot</button>
+  <dialog id="bot-dialog" class="wide" aria-labelledby="bot-title">
+    <form id="bot-form" class="compose" novalidate>
+      <div class="compose-stage" aria-hidden="true">
+        <span id="preview-print" class="preview-print glow"></span>
+        <div id="preview-name" class="preview-name"></div>
+        <div id="preview-role" class="preview-role"></div>
+      </div>
+      <div class="sheet">
+        <h2 id="bot-title">New voice</h2>
+        <div>
+          <p class="label">Start from</p>
+          <div id="templates" class="chips"></div>
+        </div>
+        <label class="field">Name<input name="name" maxlength="24" placeholder="Nova" autocomplete="off"></label>
+        <label class="field">What it's for<input name="role" maxlength="90" placeholder="Finds facts and compares options" autocomplete="off"></label>
+        <fieldset>
+          <legend class="label">Personality</legend>
+          <div id="traits" class="chips"></div>
+        </fieldset>
+        <fieldset>
+          <legend class="label">Its colour</legend>
+          <div id="swatches" class="swatches"></div>
+        </fieldset>
+        <div class="row2">
+          <label class="field">Voice<select id="voice-select" name="voice"></select></label>
+          <label class="field">Speaking speed <output id="speed-out">1.0×</output>
+            <input name="speed" type="range" min="0.7" max="1.2" step="0.05" value="1">
+          </label>
+        </div>
+        <p id="bot-error" class="form-error" role="alert"></p>
+        <div class="sheet-actions">
+          <button class="ghost big" type="button" data-close>Cancel</button>
+          <button class="solid" type="submit">Create voice</button>
+        </div>
       </div>
     </form>
   </dialog>
 
   <dialog id="group-dialog" aria-labelledby="group-title">
     <form id="group-form" class="sheet" novalidate>
-      <h2 id="group-title">Start a group chat</h2>
-      <label>Name<input name="name" maxlength="32" placeholder="Brain trust" autocomplete="off"></label>
-      <fieldset>
-        <legend>Who's in it (two or more)</legend>
-        <div id="group-bots" class="checks"></div>
-      </fieldset>
+      <h2 id="group-title">New room</h2>
+      <p class="sheet-sub">Pick two or more voices. They take turns and talk it over with you.</p>
+      <label class="field">Name<input name="name" maxlength="32" placeholder="Brain trust" autocomplete="off"></label>
+      <div id="group-bots" class="picks" role="group" aria-label="Voices in the room"></div>
       <p id="group-error" class="form-error" role="alert"></p>
       <div class="sheet-actions">
-        <button type="button" class="chip" data-close>Cancel</button>
-        <button type="submit" class="primary">Start group</button>
+        <button class="ghost big" type="button" data-close>Cancel</button>
+        <button class="solid" type="submit">Open room</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="setup-dialog" aria-labelledby="setup-heading">
+    <form id="setup-form" class="sheet" novalidate>
+      <span id="setup-print" class="setup-print" aria-hidden="true"></span>
+      <h2 id="setup-heading">Set up Voxen</h2>
+      <p class="sheet-sub">Voxen uses three services with your own keys. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
+      <div class="key">
+        <div class="key-head"><span class="key-name">Claude</span><span id="k-claude" class="pill">Missing</span></div>
+        <p class="key-help">Thinks and writes every line. Needed for anything. Get a key at console.anthropic.com.</p>
+        <input name="ANTHROPIC_API_KEY" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="Claude key">
+      </div>
+      <div class="key">
+        <div class="key-head"><span class="key-name">Deepgram</span><span id="k-deepgram" class="pill">Missing</span></div>
+        <p class="key-help">Listens when you talk. Needed for voice. Get a key at console.deepgram.com.</p>
+        <input name="DEEPGRAM_API_KEY" type="password" placeholder="Paste your Deepgram key" autocomplete="off" aria-label="Deepgram key">
+      </div>
+      <div class="key">
+        <div class="key-head"><span class="key-name">ElevenLabs</span><span id="k-elevenlabs" class="pill">Missing</span></div>
+        <p class="key-help">Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers.</p>
+        <input name="ELEVENLABS_API_KEY" type="password" placeholder="Paste your ElevenLabs key" autocomplete="off" aria-label="ElevenLabs key">
+      </div>
+      <p id="setup-error" class="form-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button class="ghost big" type="button" data-close>Later</button>
+        <button id="setup-save" class="solid" type="submit">Save and restart</button>
       </div>
     </form>
   </dialog>

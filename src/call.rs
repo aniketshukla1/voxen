@@ -678,6 +678,7 @@ bots = ["Maya", "Sam"]
             personality: "Upbeat".into(),
             voice: "v3".into(),
             speed: 1.0,
+            color: None,
         };
         commands.send(Command::AddBot(ava)).unwrap();
         let got = next(&mut updates, 1).await;

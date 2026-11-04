@@ -1,4 +1,4 @@
-# Capability map: voice team
+# Capability map: Voxen
 
 A voice-first assistant for anyone who would rather talk than type. You talk to a
 team of named AI people, each with their own voice. They discuss, take your
@@ -48,3 +48,5 @@ actions, huddle, memory → accounts → mobile-app
   use case (each with its own chat, voice and personality, saved to `team.toml`), and group
   chats where the bots take turns reacting to each other. That covers the first part of
   `huddle`; one bot summing up comes later. Bots are yours alone until `accounts` exists.
+- 2026-11-04: Named Voxen ("voices"). The first visual identity was rejected; the new look
+  is chosen from a reference you pick. See [docs/brand-guidelines.md](docs/brand-guidelines.md).

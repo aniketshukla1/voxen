@@ -16,6 +16,9 @@ pub struct Bot {
     pub voice: String,
     #[serde(default = "normal_speed")]
     pub speed: f32,
+    /// The bot's colour in the app, as "#RRGGBB". Picked from the palette when missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// A group chat: you and two or more bots, who take turns and react to each other.
@@ -230,6 +233,13 @@ fn check_bot(bot: &Bot) -> Result<()> {
         (0.7..=1.2).contains(&bot.speed),
         "{name}'s speed must be between 0.7 and 1.2"
     );
+    if let Some(color) = &bot.color {
+        let hex = color.strip_prefix('#').unwrap_or_default();
+        ensure!(
+            hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()),
+            "{name}'s colour must look like #8B7CFF"
+        );
+    }
     Ok(())
 }
 
@@ -325,8 +335,20 @@ bots = ["Maya", "Sam"]
             personality: "Upbeat".into(),
             voice: "v4".into(),
             speed: 1.0,
+            color: Some("#FF8A65".into()),
         };
         team.add_bot(ava.clone()).unwrap();
+        let bad_color = Bot {
+            name: "Rio".into(),
+            color: Some("orange".into()),
+            ..ava.clone()
+        };
+        assert!(
+            team.add_bot(bad_color)
+                .unwrap_err()
+                .to_string()
+                .contains("colour")
+        );
         team.add_group(Group {
             name: "Trip".into(),
             bots: names(&["Ava", "Leo"]),
@@ -342,6 +364,7 @@ bots = ["Maya", "Sam"]
         std::fs::remove_file(&path).ok();
         assert!(taken.to_string().contains("taken"));
         assert_eq!(again.bot("Ava").unwrap().role, "Travel planner");
+        assert_eq!(again.bot("Ava").unwrap().color.as_deref(), Some("#FF8A65"));
         assert_eq!(again.group("trip").unwrap().bots, names(&["Ava", "Leo"]));
     }
 

@@ -1,8 +1,8 @@
 [package]
-name = "voice-team"
+name = "voxen"
 version = "0.1.0"
 edition = "2024"
-description = "The Voice Team Mac app: chat with your team, with voice one click away"
+description = "Voxen: your team of voices"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
