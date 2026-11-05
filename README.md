@@ -44,7 +44,7 @@ In a group chat the bots take turns and react to each other. Everything is saved
 | "Remember I'm vegetarian." | Every bot knows it in later chats. Saved in `data/memory.md`, which you can edit. |
 | "Remind me to call Mum at 6" / "Every morning at 8, brief me on the news" | The bot does it at that time, out loud. Saved in `data/tasks.json`. |
 | Attach a picture, PDF or text file (button, drag or paste) | The bots look at it with your next message, typed or spoken. |
-| **Think** / **Research** next to the message box | Harder thinking, or deep research across many sources. |
+| "Compare these three laptops for me" | Like Grok, every reply decides how much to think and research: quick questions stay quick, hard ones get deep research. |
 | "What are people on X saying about…" / "Make a picture of…" | Grok's X search and Grok Imagine. Needs an xAI key (optional, in Setup); pictures are saved in `data/pictures/`. |
 
 `data/` is personal and never committed.

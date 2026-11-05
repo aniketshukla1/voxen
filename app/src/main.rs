@@ -11,7 +11,7 @@ use voice_bots::audio::{self, Mic};
 use voice_bots::call::{self, Command};
 use voice_bots::claude::Claude;
 use voice_bots::team::{Bot, Group, Team};
-use voice_bots::tools::{Attachment, Mode};
+use voice_bots::tools::Attachment;
 use voice_bots::tts::Voices;
 use voice_bots::xai::Xai;
 
@@ -99,8 +99,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, open, send, attach, mode, stop, clear, voice, add_bot, add_group, voices,
-            save_keys, open_link
+            status, open, send, attach, stop, clear, voice, add_bot, add_group, voices, save_keys,
+            open_link
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -192,12 +192,6 @@ fn send(text: String, state: State<'_, CallState>) -> Result<(), String> {
 #[tauri::command]
 fn attach(files: Vec<Attachment>, state: State<'_, CallState>) -> Result<(), String> {
     state.tell(Command::Attach(files))
-}
-
-/// Quick, Think or Research, for the replies from now on.
-#[tauri::command]
-fn mode(mode: Mode, state: State<'_, CallState>) -> Result<(), String> {
-    state.tell(Command::Mode(mode))
 }
 
 /// Opens a source link in your browser. Only web links, so a reply can't open anything else.

@@ -20,8 +20,9 @@
   with finer bars, on a black squircle (made by a script that copies the app's drawing code).
 - **Colour:** black and white. Each voice brings one hue (Iris `#8E7CFF`, Tide `#2EC4B6`,
   Ember `#FF6B3D`, Sol `#FFC233`, Sky `#5AB0FF`, Bloom `#FF5FA2`); nothing else is coloured.
-- **Type:** voices speak in New York (serif); the newest line is set large and fades in word by
-  word. You and the interface use SF Pro. Names and labels are small capitals with wide spacing.
+- **Type:** chat text is plain and quiet, like Claude's apps: SF Pro at 13px, regular weight,
+  every line the same size; the newest one fades in word by word. New York (serif) is kept for
+  the big moments: the empty-room welcome line and dialog titles. You and the interface use SF Pro. Names and labels are small capitals with wide spacing.
 - **Shape:** buttons, cards, inputs and dialogs have 8px corners (`--radius` in the app's
   style.css). Only voices are round: voiceprints, colour swatches and status dots.
 - **Motion:** a spark carries the turn from one voice to the next in group rooms. All motion

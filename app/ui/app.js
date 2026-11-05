@@ -45,7 +45,6 @@ let keys = { claude: false, deepgram: false, elevenlabs: false, xai: false };
 let voiceReady = false;
 let open = "main";
 let voiceOn = false;
-let mode = "quick"; // quick, think or research
 let tray = []; // files waiting to go with your next turn
 let pendingOpen = null; // a room to open once its new voice or room shows up
 let hearing = null; // what you're saying, before your turn ends
@@ -754,14 +753,6 @@ stage.addEventListener("drop", (e) => {
   addFiles([...e.dataTransfer.files]);
 });
 
-// Think and Research: how hard the bots work on replies, until you switch back.
-function setMode(next) {
-  mode = next;
-  document.querySelectorAll(".mode").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
-  call.invoke("mode", { mode }).catch(() => {});
-}
-document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", () => setMode(mode === b.dataset.mode ? "quick" : b.dataset.mode)));
-
 // Source links and pictures open in your browser, never inside Voxen.
 document.addEventListener("click", (e) => {
   const link = e.target.closest("[data-url]");
@@ -895,7 +886,7 @@ function renderSwatches() {
 
 function updatePreview() {
   const name = botField("name").value.trim() || "New voice";
-  const print = voiceprint(name, draft.color, 170);
+  const print = voiceprint(name, draft.color, 140);
   setPrint(print, "speaking");
   $("preview-print").style.setProperty("--c", draft.color);
   $("preview-print").replaceChildren(print);
@@ -960,7 +951,7 @@ function openGroupDialog() {
       pick.setAttribute("aria-pressed", "false");
       const who = el("span", "who-pick");
       who.append(el("b", "", b.name), el("small", "", b.role));
-      pick.append(voiceprint(b.name, hue(b.name), 40), who);
+      pick.append(voiceprint(b.name, hue(b.name), 32), who);
       return pick;
     }),
   );
@@ -999,7 +990,7 @@ function openSetup() {
   }
   $("k-xai").textContent = keys.xai ? "Connected" : "Optional";
   $("k-xai").classList.toggle("ok", Boolean(keys.xai));
-  const print = voiceprint("voxen", ink(), 64, false);
+  const print = voiceprint("voxen", ink(), 52, false);
   setPrint(print, "listening");
   $("setup-print").replaceChildren(print);
   $("setup-dialog").showModal();

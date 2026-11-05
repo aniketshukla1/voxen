@@ -7,7 +7,7 @@ use crate::audio::{self, Mic, Speaker};
 use crate::claude::{Claude, Event, Source};
 use crate::stt::{self, Heard};
 use crate::team::{self, Bot, Group, Team};
-use crate::tools::{self, Attachment, Memory, Mode, Task, Tasks};
+use crate::tools::{self, Attachment, Memory, Task, Tasks};
 use crate::tts::{self, Voices};
 use crate::turn::{self, Action, Turns};
 use crate::xai::Xai;
@@ -48,8 +48,6 @@ pub enum Command {
     /// Files for the bots to look at with your next turn, typed or spoken. Replaces any
     /// attached before.
     Attach(Vec<Attachment>),
-    /// How bots work on replies from now on.
-    Mode(Mode),
     AddBot(Bot),
     AddGroup(Group),
     /// Something outside the conversations went wrong, to pass on as an update.
@@ -272,7 +270,6 @@ struct State {
     queue: Vec<String>,
     last_word_end: f64,
     speak: bool,
-    mode: Mode,
     /// Files waiting to go with your next turn.
     attached: Vec<Attachment>,
 }
@@ -364,7 +361,6 @@ impl State {
                 self.chats.remove(&self.open);
             }
             Command::Attach(files) => self.attached = files,
-            Command::Mode(mode) => self.mode = mode,
             Command::AddBot(bot) => shared.change_team(&self.open, |team| team.add_bot(bot)),
             Command::AddGroup(group) => {
                 shared.change_team(&self.open, |team| team.add_group(group))
@@ -472,7 +468,7 @@ impl State {
             (bot, prompt)
         };
         let facts = lock(&shared.memory).facts.clone();
-        let prompt = prompt + &tools::guidance(self.mode, &facts, Local::now(), shared.xai.is_some());
+        let prompt = prompt + &tools::guidance(&facts, Local::now(), shared.xai.is_some());
         let entry = self.chats.entry(chat.to_string()).or_default();
         entry.last_bot = Some(bot.name.clone());
         let mut content = entry.files.clone();
@@ -484,7 +480,6 @@ impl State {
             heard: Arc::new(Mutex::new(String::new())),
             started,
             speak,
-            mode: self.mode,
             bot: bot.clone(),
         };
         shared.send(
@@ -585,13 +580,12 @@ struct Job {
     heard: Arc<Mutex<String>>,
     started: Instant,
     speak: bool,
-    mode: Mode,
 }
 
 /// Streams a bot's reply from Claude, showing it as it arrives and, when `speak` is on,
 /// saying it sentence by sentence. Runs the bot's tools until it has its answer.
 async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
-    let tools = tools::definitions(job.mode, shared.xai.is_some(), shared.timezone.as_deref());
+    let tools = tools::definitions(shared.xai.is_some(), shared.timezone.as_deref());
     let mut messages = vec![json!({"role": "user", "content": job.content})];
     let mouth = job
         .speak
@@ -619,7 +613,7 @@ async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
     for _ in 0..8 {
         let events = shared
             .claude
-            .stream(&job.prompt, &messages, &tools, job.mode.effort())
+            .stream(&job.prompt, &messages, &tools, tools::EFFORT)
             .await?;
         let mut events = std::pin::pin!(events);
         let (mut calls, mut end) = (Vec::new(), None);
@@ -1008,7 +1002,6 @@ bots = ["Maya", "Sam"]
             heard: Arc::default(),
             started: Instant::now(),
             speak: false,
-            mode: Mode::Quick,
         };
         let mut cited = Vec::new();
         let run = |name: &str, input: Value| {

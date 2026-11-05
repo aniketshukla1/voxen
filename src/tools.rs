@@ -8,21 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-/// How a bot works on a reply: quickly, thinking harder, or researching in depth.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Mode {
-    #[default]
-    Quick,
-    Think,
-    Research,
-}
-
-impl Mode {
-    pub fn effort(self) -> &'static str {
-        if self == Mode::Quick { "low" } else { "high" }
-    }
-}
+/// How hard the bots work. Claude decides on every reply how much to think and whether to
+/// research, like Grok's auto mode; medium keeps quick questions quick on a call.
+pub const EFFORT: &str = "medium";
 
 /// A file you attached for the bots to look at.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -47,21 +35,20 @@ impl Attachment {
     }
 }
 
-/// The tools a bot gets. X search and pictures need the xAI key; `timezone` makes searches
-/// local.
-pub fn definitions(mode: Mode, xai: bool, timezone: Option<&str>) -> Vec<Value> {
-    let research = mode == Mode::Research;
+/// The tools a bot gets. The search limits leave room for deep research; a bot uses only what
+/// a question needs. X search and pictures need the xAI key; `timezone` makes searches local.
+pub fn definitions(xai: bool, timezone: Option<&str>) -> Vec<Value> {
     let mut search = json!({
         "type": "web_search_20260209",
         "name": "web_search",
-        "max_uses": if research { 15 } else { 5 },
+        "max_uses": 15,
     });
     if let Some(tz) = timezone {
         search["user_location"] = json!({"type": "approximate", "timezone": tz});
     }
     let mut tools = vec![
         search,
-        json!({"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": if research { 10 } else { 3 }}),
+        json!({"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10}),
         tool(
             "remember",
             "Save a lasting fact about the user, like a preference, a name or a plan, so every \
@@ -130,7 +117,7 @@ fn tool(name: &str, description: &str, properties: Value) -> Value {
 }
 
 /// What a bot needs to know to use its tools well, added to its system prompt.
-pub fn guidance(mode: Mode, memory: &[String], now: DateTime<Local>, xai: bool) -> String {
+pub fn guidance(memory: &[String], now: DateTime<Local>, xai: bool) -> String {
     let mut text = format!(
         "\n\nIt's {} where the user is. You can search the web and read pages: do it for \
          anything current or that you aren't sure of, like news, weather, prices, scores, \
@@ -148,13 +135,11 @@ pub fn guidance(mode: Mode, memory: &[String], now: DateTime<Local>, xai: bool) 
          with remember. Use schedule for reminders and repeating tasks. A line from \"Scheduled \
          task\" is one of those firing now: do it.",
     );
-    if mode == Mode::Research {
-        text.push_str(
-            " The user asked for deep research: search several times from different angles, \
-             read the best sources, then give a clear, well-founded answer and say what's still \
-             uncertain.",
-        );
-    }
+    text.push_str(
+        " Decide for yourself how much each question needs: answer simple things straight away, \
+         and research anything that needs it properly, searching from a few angles and reading \
+         the best sources, then say what's still uncertain.",
+    );
     if !memory.is_empty() {
         text.push_str("\n\nWhat you know about the user from earlier chats:\n- ");
         text.push_str(&memory.join("\n- "));
@@ -477,18 +462,17 @@ mod tests {
     }
 
     #[test]
-    fn x_and_pictures_need_the_xai_key_and_research_searches_more() {
+    fn x_and_pictures_need_the_xai_key() {
         let names = |tools: &[Value]| -> Vec<String> {
             tools.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
         };
-        let quick = definitions(Mode::Quick, false, Some("Asia/Kolkata"));
-        assert!(!names(&quick).contains(&"search_x".to_string()));
-        assert_eq!(quick[0]["max_uses"], 5);
-        assert_eq!(quick[0]["user_location"]["timezone"], "Asia/Kolkata");
-        let research = definitions(Mode::Research, true, None);
-        assert!(names(&research).contains(&"create_image".to_string()));
-        assert_eq!(research[0]["max_uses"], 15);
-        assert_eq!(research[2]["input_schema"]["required"], json!(["fact"]));
+        let plain = definitions(false, Some("Asia/Kolkata"));
+        assert!(!names(&plain).contains(&"search_x".to_string()));
+        assert_eq!(plain[0]["max_uses"], 15);
+        assert_eq!(plain[0]["user_location"]["timezone"], "Asia/Kolkata");
+        let with_xai = definitions(true, None);
+        assert!(names(&with_xai).contains(&"create_image".to_string()));
+        assert_eq!(with_xai[2]["input_schema"]["required"], json!(["fact"]));
     }
 
     #[test]
