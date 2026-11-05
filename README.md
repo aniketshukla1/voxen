@@ -11,7 +11,8 @@ cargo run -p voxen
 ```
 
 The window opens even without keys and walks you through setup: paste your keys there and
-Voxen restarts with them. Typing needs only the Claude key; voice needs all three.
+Voxen restarts with them. Typing needs a key for the provider your main bot thinks with
+(Claude to start with); voice also needs Deepgram and ElevenLabs.
 
 ## Keys (about 10 minutes)
 
@@ -35,6 +36,16 @@ The terminal version still works: `cargo run --release`.
 Maya is the main bot. Create more bots and group chats with the + buttons in the sidebar.
 In a group chat the bots take turns and react to each other. Everything is saved in
 [team.toml](team.toml), which you can also edit by hand.
+
+## Each bot thinks with the brain you pick
+
+Every bot can use a different provider and model: Anthropic Claude, OpenAI, Google Gemini,
+xAI Grok, Mistral, DeepSeek, Perplexity, OpenRouter (hundreds of models), Groq, Together,
+Fireworks, Cerebras, Moonshot Kimi, Alibaba Qwen, Ollama or LM Studio on your Mac, or any
+OpenAI-compatible server. Pick it when you make a bot, or click a bot (or Change voice) to
+switch it any time; the model list loads live from the provider. Add the provider's key in
+Setup first. Web search works with Claude, OpenAI, Gemini, Grok and Perplexity; memory and
+reminders work with every provider except Perplexity.
 
 ## What the bots can do
 

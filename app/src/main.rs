@@ -2,50 +2,55 @@
 //! each other, with voice one click away.
 
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::mpsc;
 use voice_bots::audio::{self, Mic};
 use voice_bots::call::{self, Command};
-use voice_bots::claude::Claude;
+use voice_bots::llm::{self, Brains, Provider};
 use voice_bots::team::{Bot, Group, Team};
 use voice_bots::tools::Attachment;
 use voice_bots::tts::Voices;
 use voice_bots::xai::Xai;
 
-/// The keys Voxen uses, in the order the setup screen shows them.
-const KEY_NAMES: [&str; 4] = [
-    "ANTHROPIC_API_KEY",
-    "DEEPGRAM_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "XAI_API_KEY",
-];
+const DEEPGRAM: &str = "DEEPGRAM_API_KEY";
+const ELEVENLABS: &str = "ELEVENLABS_API_KEY";
+
+/// Every setting Setup can save: the two voice keys, each provider's key, and the address of
+/// an OpenAI-compatible server of your own.
+fn key_names() -> Vec<&'static str> {
+    let mut names = vec![DEEPGRAM, ELEVENLABS];
+    names.extend(llm::PROVIDERS.iter().filter_map(|p| p.key));
+    names.push("CUSTOM_BASE_URL");
+    names
+}
 
 /// What the window needs when it opens.
 #[derive(Clone, Serialize)]
 struct Status {
-    /// Text chat works: the Claude key is set and the team loaded.
+    /// Text chat works: the main bot's provider has its key and the team loaded.
     chat: bool,
     /// Voice works too: listening and voice keys are set and a speaker was found.
     voice: bool,
     /// Why chat or voice is off, if one is.
     problem: Option<String>,
-    keys: Keys,
+    /// Which settings are filled in, by name.
+    keys: BTreeMap<String, bool>,
+    /// Every provider a bot can think with.
+    providers: Vec<Brain>,
     main: String,
     bots: Vec<Bot>,
     groups: Vec<Group>,
 }
 
-/// Which keys are set.
+/// A provider, and whether it can be used now.
 #[derive(Clone, Serialize)]
-struct Keys {
-    claude: bool,
-    deepgram: bool,
-    elevenlabs: bool,
-    /// Optional: X search and pictures.
-    xai: bool,
+struct Brain {
+    #[serde(flatten)]
+    provider: &'static Provider,
+    ready: bool,
 }
 
 #[derive(Serialize)]
@@ -81,7 +86,7 @@ impl CallState {
         let commands = self
             .commands
             .as_ref()
-            .ok_or("Chat is off: add your Claude key in Setup.")?;
+            .ok_or("Voxen couldn't load your team; check team.toml.")?;
         commands
             .send(command)
             .map_err(|_| "Voxen's conversations have stopped.".to_string())
@@ -99,8 +104,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, open, send, attach, stop, clear, voice, add_bot, add_group, voices, save_keys,
-            open_link
+            status, open, send, attach, stop, clear, voice, add_bot, update_bot, add_group, voices,
+            models, save_keys, open_link
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -116,12 +121,12 @@ fn key_set(name: &str) -> bool {
 /// Loads the team and keys and starts the conversations. Anything missing is reported in the
 /// window instead of stopping the app, so it always opens.
 async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
-    let keys = Keys {
-        claude: key_set(KEY_NAMES[0]),
-        deepgram: key_set(KEY_NAMES[1]),
-        elevenlabs: key_set(KEY_NAMES[2]),
-        xai: key_set(KEY_NAMES[3]),
-    };
+    let keys: BTreeMap<String, bool> = key_names().into_iter().map(|k| (k.to_string(), key_set(k))).collect();
+    let brains = Brains::new();
+    let providers: Vec<Brain> = llm::PROVIDERS
+        .iter()
+        .map(|provider| Brain { provider, ready: brains.ready(provider.id) })
+        .collect();
     let team = match Team::load(root.join("team.toml")) {
         Ok(team) => team,
         Err(e) => {
@@ -132,6 +137,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
                     voice: false,
                     problem: Some(format!("{e:#}")),
                     keys,
+                    providers,
                     main: String::new(),
                     bots: Vec::new(),
                     groups: Vec::new(),
@@ -144,20 +150,22 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         voice: false,
         problem: None,
         keys,
+        providers,
         main: team.main.clone(),
         bots: team.bots.clone(),
         groups: team.groups.clone(),
     };
-    let Ok(claude) = Claude::from_env() else {
-        status.problem = Some("Add your Claude key in Setup to start chatting.".into());
-        return CallState::off(root, status);
-    };
+    let thinker = team.main_bot().provider.clone();
+    status.chat = brains.ready(&thinker);
+    if !status.chat {
+        let name = llm::find(&thinker).map_or("your provider", |p| p.name);
+        status.problem = Some(format!("Add your {name} key in Setup to start chatting."));
+    }
     let names = team.names();
     let voices = Voices::from_env().ok();
     let speaker = voices.as_ref().and_then(|_| audio::speaker().ok());
-    status.chat = true;
-    status.voice = speaker.is_some() && status.keys.deepgram;
-    let (commands, mut updates) = call::start(team, claude, voices, speaker, Xai::from_env().ok());
+    status.voice = speaker.is_some() && key_set(DEEPGRAM);
+    let (commands, mut updates) = call::start(team, brains, voices, speaker, Xai::from_env().ok());
     tauri::async_runtime::spawn(async move {
         while let Some(update) = updates.recv().await {
             app.emit("call", update).ok();
@@ -222,6 +230,19 @@ fn add_bot(bot: Bot, state: State<'_, CallState>) -> Result<(), String> {
     state.tell(Command::AddBot(bot))
 }
 
+/// Changes one of your bots: its brain, voice, colour or what it's for.
+#[tauri::command]
+fn update_bot(bot: Bot, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::UpdateBot(bot))
+}
+
+/// The models a provider offers right now.
+#[tauri::command]
+async fn models(provider: String) -> Result<Vec<String>, String> {
+    let brain = Brains::new().llm(&provider, "list").map_err(|e| format!("{e:#}"))?;
+    brain.models().await.map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn add_group(group: Group, state: State<'_, CallState>) -> Result<(), String> {
     state.tell(Command::AddGroup(group))
@@ -248,7 +269,7 @@ async fn voice(on: bool, state: State<'_, CallState>) -> Result<(), String> {
         return Err("Voice needs your Deepgram and ElevenLabs keys. Add them in Setup.".into());
     }
     let mic = if on {
-        let key = std::env::var(KEY_NAMES[1]).map_err(|e| e.to_string())?;
+        let key = std::env::var(DEEPGRAM).map_err(|e| e.to_string())?;
         let commands = state.commands.clone().ok_or("Chat is off.")?;
         Some(call::listen(key, state.names.clone(), commands).map_err(|e| format!("{e:#}"))?)
     } else {
@@ -275,7 +296,8 @@ fn save_keys(
 /// Puts each key into the `.env` text, replacing its line or adding one. Empty values are skipped.
 fn merge_env(current: &str, keys: &HashMap<String, String>) -> Result<String, String> {
     let mut lines: Vec<String> = current.lines().map(str::to_string).collect();
-    for name in KEY_NAMES {
+    let names = key_names();
+    for name in names.iter().copied() {
         let Some(value) = keys.get(name).map(|v| v.trim()).filter(|v| !v.is_empty()) else {
             continue;
         };
@@ -294,7 +316,7 @@ fn merge_env(current: &str, keys: &HashMap<String, String>) -> Result<String, St
             None => lines.push(line),
         }
     }
-    if let Some(unknown) = keys.keys().find(|k| !KEY_NAMES.contains(&k.as_str())) {
+    if let Some(unknown) = keys.keys().find(|k| !names.contains(&k.as_str())) {
         return Err(format!("{unknown} isn't a key Voxen uses."));
     }
     Ok(lines.join("\n") + "\n")

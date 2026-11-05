@@ -39,6 +39,7 @@
         <span id="room-sub" class="room-sub"></span>
       </div>
       <div class="top-actions">
+        <button id="edit" class="ghost" type="button" hidden>Change voice</button>
         <button id="clear" class="ghost" type="button">Clear</button>
       </div>
     </header>
@@ -91,6 +92,15 @@
         <label class="field">Name<input name="name" maxlength="24" placeholder="Nova" autocomplete="off"></label>
         <label class="field">What it's for<input name="role" maxlength="90" placeholder="Finds facts and compares options" autocomplete="off"></label>
         <fieldset>
+          <legend class="label">Thinks with</legend>
+          <div class="row2">
+            <label class="field">Provider<select id="provider-select" name="provider"></select></label>
+            <label class="field">Model<input id="model-input" name="model" list="model-options" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <datalist id="model-options"></datalist>
+          <p id="brain-note" class="hint"></p>
+        </fieldset>
+        <fieldset>
           <legend class="label">Personality</legend>
           <div id="traits" class="chips"></div>
         </fieldset>
@@ -107,7 +117,7 @@
         <p id="bot-error" class="form-error" role="alert"></p>
         <div class="sheet-actions">
           <button class="ghost big" type="button" data-close>Cancel</button>
-          <button class="solid" type="submit">Create voice</button>
+          <button id="bot-save" class="solid" type="submit">Create voice</button>
         </div>
       </div>
     </form>
@@ -131,27 +141,11 @@
     <form id="setup-form" class="sheet" novalidate>
       <span id="setup-print" class="setup-print" aria-hidden="true"></span>
       <h2 id="setup-heading">Set up Voxen</h2>
-      <p class="sheet-sub">Voxen runs on your own keys: three it needs, and xAI if you want Grok's tools too. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
-      <div class="key">
-        <div class="key-head"><span class="key-name">Claude</span><span id="k-claude" class="pill">Missing</span></div>
-        <p class="key-help">Thinks and writes every line. Needed for anything. Get a key at console.anthropic.com.</p>
-        <input name="ANTHROPIC_API_KEY" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="Claude key">
-      </div>
-      <div class="key">
-        <div class="key-head"><span class="key-name">Deepgram</span><span id="k-deepgram" class="pill">Missing</span></div>
-        <p class="key-help">Listens when you talk. Needed for voice. Get a key at console.deepgram.com.</p>
-        <input name="DEEPGRAM_API_KEY" type="password" placeholder="Paste your Deepgram key" autocomplete="off" aria-label="Deepgram key">
-      </div>
-      <div class="key">
-        <div class="key-head"><span class="key-name">ElevenLabs</span><span id="k-elevenlabs" class="pill">Missing</span></div>
-        <p class="key-help">Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers.</p>
-        <input name="ELEVENLABS_API_KEY" type="password" placeholder="Paste your ElevenLabs key" autocomplete="off" aria-label="ElevenLabs key">
-      </div>
-      <div class="key">
-        <div class="key-head"><span class="key-name">xAI</span><span id="k-xai" class="pill optional">Optional</span></div>
-        <p class="key-help">Adds Grok's own tools: searching X, and making pictures with Grok Imagine. Get a key at console.x.ai.</p>
-        <input name="XAI_API_KEY" type="password" placeholder="xai-…" autocomplete="off" aria-label="xAI key">
-      </div>
+      <p class="sheet-sub">Voxen runs on your own keys. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
+      <p class="label">Voice</p>
+      <div id="voice-keys" class="keys"></div>
+      <p class="label">Brains: add any you like. Each bot can think with a different one.</p>
+      <div id="brain-keys" class="keys"></div>
       <p id="setup-error" class="form-error" role="alert"></p>
       <div class="sheet-actions">
         <button class="ghost big" type="button" data-close>Later</button>

@@ -4,7 +4,8 @@
 //! A front-end (the terminal, the app window) sends it commands and shows its updates.
 
 use crate::audio::{self, Mic, Speaker};
-use crate::claude::{Claude, Event, Source};
+use crate::claude::{Event, Source};
+use crate::llm::{self, Brains, ToolResult};
 use crate::stt::{self, Heard};
 use crate::team::{self, Bot, Group, Team};
 use crate::tools::{self, Attachment, Memory, Task, Tasks};
@@ -49,6 +50,8 @@ pub enum Command {
     /// attached before.
     Attach(Vec<Attachment>),
     AddBot(Bot),
+    /// Change a bot, found by name: its brain, voice, colour or what it's for.
+    UpdateBot(Bot),
     AddGroup(Group),
     /// Something outside the conversations went wrong, to pass on as an update.
     Problem(String),
@@ -103,11 +106,12 @@ pub enum Update {
 }
 
 /// Starts the conversations on the current Tokio runtime. Send commands in, read updates out.
-/// Without `voices` and `speaker` it still works, as text chat; without `xai` the bots can't
-/// search X or make pictures.
+/// `brains` makes each bot's model client from its provider and model. Without `voices` and
+/// `speaker` it still works, as text chat; without `xai` the bots can't search X or make
+/// pictures.
 pub fn start(
     team: Team,
-    claude: Claude,
+    brains: Brains,
     voices: Option<Voices>,
     speaker: Option<Speaker>,
     xai: Option<Xai>,
@@ -126,7 +130,7 @@ pub fn start(
         pictures: file("pictures"),
         timezone: tools::timezone(),
         team: RwLock::new(team),
-        claude,
+        brains,
         voices,
         speaker,
         xai,
@@ -185,7 +189,7 @@ pub fn listen(
 /// Everything the replies need, shared with their tasks.
 struct Shared {
     team: RwLock<Team>,
-    claude: Claude,
+    brains: Brains,
     voices: Option<Voices>,
     speaker: Option<Speaker>,
     xai: Option<Xai>,
@@ -362,6 +366,7 @@ impl State {
             }
             Command::Attach(files) => self.attached = files,
             Command::AddBot(bot) => shared.change_team(&self.open, |team| team.add_bot(bot)),
+            Command::UpdateBot(bot) => shared.change_team(&self.open, |team| team.update_bot(bot)),
             Command::AddGroup(group) => {
                 shared.change_team(&self.open, |team| team.add_group(group))
             }
@@ -468,7 +473,13 @@ impl State {
             (bot, prompt)
         };
         let facts = lock(&shared.memory).facts.clone();
-        let prompt = prompt + &tools::guidance(&facts, Local::now(), shared.xai.is_some());
+        let brain = llm::find(&bot.provider);
+        let can = tools::Abilities {
+            web: brain.is_some_and(|p| p.web),
+            tools: brain.is_some_and(|p| p.tools),
+            xai: shared.xai.is_some(),
+        };
+        let prompt = prompt + &tools::guidance(&facts, Local::now(), can);
         let entry = self.chats.entry(chat.to_string()).or_default();
         entry.last_bot = Some(bot.name.clone());
         let mut content = entry.files.clone();
@@ -585,8 +596,9 @@ struct Job {
 /// Streams a bot's reply from Claude, showing it as it arrives and, when `speak` is on,
 /// saying it sentence by sentence. Runs the bot's tools until it has its answer.
 async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
-    let tools = tools::definitions(shared.xai.is_some(), shared.timezone.as_deref());
-    let mut messages = vec![json!({"role": "user", "content": job.content})];
+    let llm = shared.brains.llm(&job.bot.provider, &job.bot.model)?;
+    let functions = tools::functions(shared.xai.is_some(), llm.provider.id == "xai");
+    let mut convo = llm.start(&job.content);
     let mouth = job
         .speak
         .then(|| shared.voices.as_ref().zip(shared.speaker.as_ref()))
@@ -611,9 +623,8 @@ async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
     let (mut cited, mut found) = (Vec::new(), Vec::new());
     // ponytail: at most 8 rounds of tools per reply; raise it if deep research needs more.
     for _ in 0..8 {
-        let events = shared
-            .claude
-            .stream(&job.prompt, &messages, &tools, tools::EFFORT)
+        let events = llm
+            .stream(&job.prompt, &convo, &functions, tools::EFFORT, shared.timezone.as_deref())
             .await?;
         let mut events = std::pin::pin!(events);
         let (mut calls, mut end) = (Vec::new(), None);
@@ -640,17 +651,16 @@ async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
             "tool_use" => {
                 let mut results = Vec::new();
                 for (id, name, input) in calls {
-                    let (text, failed) = match use_tool(&shared, &job, &name, &input, &mut cited).await {
+                    let (output, failed) = match use_tool(&shared, &job, &name, &input, &mut cited).await {
                         Ok(text) => (text, false),
                         Err(e) => (format!("{e:#}"), true),
                     };
-                    results.push(json!({"type": "tool_result", "tool_use_id": id, "content": text, "is_error": failed}));
+                    results.push(ToolResult { id, name, output, failed });
                 }
-                messages.push(json!({"role": "assistant", "content": content}));
-                messages.push(json!({"role": "user", "content": results}));
+                llm.carry_on(&mut convo, content, results);
             }
             // A long run of searches paused on the server: send it back as it is to carry on.
-            "pause_turn" => messages.push(json!({"role": "assistant", "content": content})),
+            "pause_turn" => llm.carry_on(&mut convo, content, Vec::new()),
             "refusal" => {
                 let text = format!("{} declined to answer that", job.bot.name);
                 shared.send(&job.chat, Update::Problem { text });
@@ -888,9 +898,8 @@ bots = ["Maya", "Sam"]
         mpsc::UnboundedSender<Command>,
         mpsc::UnboundedReceiver<ChatUpdate>,
     ) {
-        // Nothing listens on port 9, so every Claude request fails at once, offline.
-        let claude = Claude::new("test", "http://127.0.0.1:9", "claude-opus-5-5");
-        start(Team::parse(TEAM).unwrap(), claude, None, None, None)
+        // Nothing listens on port 9, so every request fails at once, offline.
+        start(Team::parse(TEAM).unwrap(), Brains::offline(), None, None, None)
     }
 
     async fn next(updates: &mut mpsc::UnboundedReceiver<ChatUpdate>, n: usize) -> Vec<ChatUpdate> {
@@ -947,6 +956,8 @@ bots = ["Maya", "Sam"]
             voice: "v3".into(),
             speed: 1.0,
             color: None,
+            provider: "openai".into(),
+            model: String::new(),
         };
         commands.send(Command::AddBot(ava)).unwrap();
         let got = next(&mut updates, 1).await;
@@ -980,11 +991,10 @@ bots = ["Maya", "Sam"]
 
     #[tokio::test]
     async fn local_tools_remember_and_schedule() {
-        let claude = Claude::new("test", "http://127.0.0.1:9", "claude-opus-5-5");
         let (updates, _rx) = mpsc::unbounded_channel();
         let shared = Shared {
             team: RwLock::new(Team::parse(TEAM).unwrap()),
-            claude,
+            brains: Brains::offline(),
             voices: None,
             speaker: None,
             xai: None,
@@ -1018,5 +1028,47 @@ bots = ["Maya", "Sam"]
         assert!(set.contains("Maya: Stretch"), "{set}");
         assert!(run("search_x", json!({"query": "rust"})).await.unwrap_err().to_string().contains("xAI key"));
         assert!(use_tool(&shared, &job, "remember", &Value::Null, &mut cited).await.is_err());
+    }
+    /// Runs one typed turn in the main chat against the real API and returns its updates.
+    async fn live_turn(said: &str) -> Vec<Update> {
+        dotenvy::dotenv().ok();
+        let brains = Brains::new();
+        assert!(brains.ready("anthropic"), "put ANTHROPIC_API_KEY in .env (Setup in the app does it)");
+        let (commands, mut updates) = start(Team::parse(TEAM).unwrap(), brains, None, None, None);
+        commands.send(Command::Typed(said.into())).unwrap();
+        let mut got = Vec::new();
+        // Done comes before any problem with the reply, so wait a moment past it.
+        let mut wait = Duration::from_secs(180);
+        while let Ok(Some(update)) = tokio::time::timeout(wait, updates.recv()).await {
+            if matches!(update.update, Update::Done { .. }) {
+                wait = Duration::from_secs(1);
+            }
+            got.push(update.update);
+        }
+        got
+    }
+
+    #[tokio::test]
+    #[ignore = "calls the real API; needs ANTHROPIC_API_KEY"]
+    async fn live_reply_searches_the_web_and_shows_sources() {
+        let got = live_turn("What's the biggest news story today? One sentence.").await;
+        let ok = |test: fn(&Update) -> bool| got.iter().any(test);
+        assert!(!ok(|u| matches!(u, Update::Problem { .. })), "{got:#?}");
+        assert!(ok(|u| matches!(u, Update::Step { text, .. } if text.starts_with("Searching the web"))), "{got:#?}");
+        assert!(ok(|u| matches!(u, Update::Text { .. })), "{got:#?}");
+        assert!(ok(|u| matches!(u, Update::Sources { sources, .. } if !sources.is_empty())), "{got:#?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "calls the real API; needs ANTHROPIC_API_KEY"]
+    async fn live_reply_runs_our_own_tools() {
+        let got = live_turn("Please remember that my favourite colour is teal.").await;
+        assert!(!got.iter().any(|u| matches!(u, Update::Problem { .. })), "{got:#?}");
+        assert!(
+            got.iter().any(|u| matches!(u, Update::Step { text, .. } if text.starts_with("Remembering"))),
+            "{got:#?}"
+        );
+        // The reply carries on after the tool runs.
+        assert!(got.iter().any(|u| matches!(u, Update::Text { .. })), "{got:#?}");
     }
 }

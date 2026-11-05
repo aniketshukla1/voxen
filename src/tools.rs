@@ -1,4 +1,4 @@
-//! What bots can do besides talk: search the web and read pages (on Anthropic's servers),
+//! What bots can do besides talk: search the web and read pages (with providers that can),
 //! remember things about you, set reminders and repeating tasks, look at files you attach,
 //! and, with an xAI key, search X and make pictures with Grok Imagine.
 
@@ -35,20 +35,11 @@ impl Attachment {
     }
 }
 
-/// The tools a bot gets. The search limits leave room for deep research; a bot uses only what
-/// a question needs. X search and pictures need the xAI key; `timezone` makes searches local.
-pub fn definitions(xai: bool, timezone: Option<&str>) -> Vec<Value> {
-    let mut search = json!({
-        "type": "web_search_20260209",
-        "name": "web_search",
-        "max_uses": 15,
-    });
-    if let Some(tz) = timezone {
-        search["user_location"] = json!({"type": "approximate", "timezone": tz});
-    }
+/// Voxen's own tools, as plain `{name, description, parameters}` that each provider's client
+/// puts in its own form. X search and pictures need the xAI key; `native_x` leaves X search
+/// out for Grok, which searches X by itself.
+pub fn functions(xai: bool, native_x: bool) -> Vec<Value> {
     let mut tools = vec![
-        search,
-        json!({"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 10}),
         tool(
             "remember",
             "Save a lasting fact about the user, like a preference, a name or a plan, so every \
@@ -82,13 +73,15 @@ pub fn definitions(xai: bool, timezone: Option<&str>) -> Vec<Value> {
             json!({"number": {"type": "integer"}}),
         ),
     ];
-    if xai {
+    if xai && !native_x {
         tools.push(tool(
             "search_x",
             "Search posts on X for what people are saying right now: reactions, breaking news, \
              trends, or someone's posts.",
             json!({"query": {"type": "string"}}),
         ));
+    }
+    if xai {
         tools.push(tool(
             "create_image",
             "Make a picture with Grok Imagine. It appears in the chat.",
@@ -106,40 +99,54 @@ fn tool(name: &str, description: &str, properties: Value) -> Value {
     json!({
         "name": name,
         "description": description,
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": properties,
             "required": required,
             "additionalProperties": false,
         },
-        "eager_input_streaming": true,
     })
 }
 
+/// What a bot can do with the brain it has.
+#[derive(Debug, Clone, Copy)]
+pub struct Abilities {
+    /// It can search the web.
+    pub web: bool,
+    /// It can use Voxen's tools: memory, reminders and the rest.
+    pub tools: bool,
+    /// The xAI key is set: X search and pictures.
+    pub xai: bool,
+}
+
 /// What a bot needs to know to use its tools well, added to its system prompt.
-pub fn guidance(memory: &[String], now: DateTime<Local>, xai: bool) -> String {
-    let mut text = format!(
-        "\n\nIt's {} where the user is. You can search the web and read pages: do it for \
-         anything current or that you aren't sure of, like news, weather, prices, scores, \
-         times and places, and give the answer in your own words, without links.",
-        now.format("%A %-d %B %Y, %H:%M")
-    );
-    if xai {
+pub fn guidance(memory: &[String], now: DateTime<Local>, can: Abilities) -> String {
+    let mut text = format!("\n\nIt's {} where the user is.", now.format("%A %-d %B %Y, %H:%M"));
+    if can.web {
         text.push_str(
-            " Use search_x for what people are saying on X right now, and create_image when \
-             the user wants a picture.",
+            " You can search the web and read pages: do it for anything current or that you \
+             aren't sure of, like news, weather, prices, scores, times and places, and give the \
+             answer in your own words, without links. Decide for yourself how much each question \
+             needs: answer simple things straight away, and research anything that needs it \
+             properly, searching from a few angles and reading the best sources, then say what's \
+             still uncertain.",
+        );
+    } else {
+        text.push_str(" You can't search the web, so say so when an answer may be out of date.");
+    }
+    if can.tools {
+        if can.xai {
+            text.push_str(
+                " You can search X for what people are saying right now, and make pictures with \
+                 create_image.",
+            );
+        }
+        text.push_str(
+            " When the user tells you something worth keeping, like a preference or a name, save \
+             it with remember. Use schedule for reminders and repeating tasks. A line from \
+             \"Scheduled task\" is one of those firing now: do it.",
         );
     }
-    text.push_str(
-        " When the user tells you something worth keeping, like a preference or a name, save it \
-         with remember. Use schedule for reminders and repeating tasks. A line from \"Scheduled \
-         task\" is one of those firing now: do it.",
-    );
-    text.push_str(
-        " Decide for yourself how much each question needs: answer simple things straight away, \
-         and research anything that needs it properly, searching from a few angles and reading \
-         the best sources, then say what's still uncertain.",
-    );
     if !memory.is_empty() {
         text.push_str("\n\nWhat you know about the user from earlier chats:\n- ");
         text.push_str(&memory.join("\n- "));
@@ -151,9 +158,11 @@ pub fn guidance(memory: &[String], now: DateTime<Local>, xai: bool) -> String {
 pub fn step(tool: &str, input: &Value) -> String {
     let field = |key: &str| input[key].as_str().unwrap_or_default().trim().to_string();
     match tool {
+        "web_search" if field("query").is_empty() => "Searching the web".into(),
         "web_search" => format!("Searching the web for “{}”", field("query")),
+        "search_x" | "x_search" if field("query").is_empty() => "Searching X".into(),
         "web_fetch" => format!("Reading {}", host(&field("url"))),
-        "search_x" => format!("Searching X for “{}”", field("query")),
+        "search_x" | "x_search" => format!("Searching X for “{}”", field("query")),
         "create_image" => "Making a picture".into(),
         "remember" => format!("Remembering: {}", field("fact")),
         "forget" => format!("Forgetting “{}”", field("words")),
@@ -169,7 +178,7 @@ pub fn filler(tool: &str) -> Option<&'static str> {
     match tool {
         "web_search" => Some("Let me look that up."),
         "web_fetch" => Some("Let me read that."),
-        "search_x" => Some("Let me check X."),
+        "search_x" | "x_search" => Some("Let me check X."),
         "create_image" => Some("Making that now."),
         _ => None,
     }
@@ -466,13 +475,12 @@ mod tests {
         let names = |tools: &[Value]| -> Vec<String> {
             tools.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
         };
-        let plain = definitions(false, Some("Asia/Kolkata"));
-        assert!(!names(&plain).contains(&"search_x".to_string()));
-        assert_eq!(plain[0]["max_uses"], 15);
-        assert_eq!(plain[0]["user_location"]["timezone"], "Asia/Kolkata");
-        let with_xai = definitions(true, None);
-        assert!(names(&with_xai).contains(&"create_image".to_string()));
-        assert_eq!(with_xai[2]["input_schema"]["required"], json!(["fact"]));
+        let plain = names(&functions(false, false));
+        assert!(!plain.contains(&"search_x".to_string()) && !plain.contains(&"create_image".to_string()));
+        let with_xai = names(&functions(true, false));
+        assert!(with_xai.contains(&"search_x".to_string()) && with_xai.contains(&"create_image".to_string()));
+        assert!(!names(&functions(true, true)).contains(&"search_x".to_string()), "Grok searches X itself");
+        assert_eq!(functions(false, false)[0]["parameters"]["required"], json!(["fact"]));
     }
 
     #[test]

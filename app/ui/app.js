@@ -46,6 +46,8 @@ let voiceReady = false;
 let open = "main";
 let voiceOn = false;
 let tray = []; // files waiting to go with your next turn
+let providers = []; // every provider a bot can think with, and whether its key is in
+let editing = null; // the bot being changed in the voice dialog, or null for a new one
 let pendingOpen = null; // a room to open once its new voice or room shows up
 let hearing = null; // what you're saying, before your turn ends
 let demo = []; // timers of a running demo
@@ -242,11 +244,19 @@ function markUnread(room) {
   document.querySelector(`.room-btn[data-room="${CSS.escape(room)}"]`)?.classList.add("unread");
 }
 
+// Who thinks for a bot: its provider, and the model shown for it.
+const brainOf = (b) => providers.find((p) => p.id === (b?.provider || "anthropic"));
+const brainLabel = (b) => {
+  const p = brainOf(b);
+  return p ? `${p.name}, ${b.model || p.model || "no model chosen"}` : "";
+};
+
 function renderSetup() {
-  const missing = [keys.claude, keys.deepgram, keys.elevenlabs].filter((ok) => !ok).length;
+  const chat = Boolean(brainOf(bot(team.main))?.ready);
+  const missing = [chat, keys.DEEPGRAM_API_KEY, keys.ELEVENLABS_API_KEY].filter((ok) => !ok).length;
   $("setup").classList.toggle("ok", missing === 0);
-  $("setup-title").textContent = missing === 0 ? "All set" : keys.claude ? "Add voice" : "Finish setup";
-  $("setup-sub").textContent = missing === 0 ? "Chat and voice are on" : keys.claude ? `${missing} key${missing > 1 ? "s" : ""} to go` : "Add your keys";
+  $("setup-title").textContent = missing === 0 ? "All set" : chat ? "Add voice" : "Finish setup";
+  $("setup-sub").textContent = missing === 0 ? "Chat and voice are on" : chat ? `${missing} key${missing > 1 ? "s" : ""} to go` : "Add your keys";
 }
 
 // The cast
@@ -262,6 +272,8 @@ function renderCast() {
       const ring = el("span", "glow");
       ring.append(voiceprint(name, hue(name), size));
       card.append(ring, el("span", "n", name), el("span", "s"));
+      card.title = `Change ${name}: brain, voice and more`;
+      card.addEventListener("click", () => bot(name) && openBotDialog(bot(name)));
       return card;
     }),
   );
@@ -435,6 +447,17 @@ function wipe(room) {
   castState(null, "idle");
 }
 
+// The room's name, who's in it, and for one bot, what it thinks with.
+function renderHeader() {
+  const names = members(open);
+  const k = kind(open);
+  const one = k === "group" ? null : bot(names[0]);
+  $("room-title").textContent = k === "group" ? open.slice(6) : names[0] || "";
+  $("room-sub").textContent =
+    k === "group" ? `${and(names)} and you` : [k === "main" ? "Main voice" : "", one?.role, brainLabel(one)].filter(Boolean).join(" · ");
+  $("edit").hidden = !one;
+}
+
 async function openRoom(room) {
   stopDemo();
   if (room !== open) {
@@ -447,8 +470,7 @@ async function openRoom(room) {
   script.hidden = false;
   const names = members(room);
   const k = kind(room);
-  $("room-title").textContent = k === "group" ? room.slice(6) : names[0] || "";
-  $("room-sub").textContent = k === "group" ? `${and(names)} and you` : k === "main" ? `Main voice · ${bot(names[0])?.role ?? ""}` : (bot(names[0])?.role ?? "");
+  renderHeader();
   renderCast();
   const line = $("welcome-line");
   const em = el("em", "", k === "group" ? room.slice(6) : names[0] || "Voxen");
@@ -485,6 +507,8 @@ function onUpdate(u) {
     case "team":
       team = { main: u.main, bots: u.bots, groups: u.groups };
       renderRail();
+      renderHeader();
+      renderSetup();
       if (pendingOpen && exists(pendingOpen)) {
         const next = pendingOpen;
         pendingOpen = null;
@@ -815,23 +839,75 @@ document.addEventListener("keydown", (e) => {
 let draft = { traits: new Set(), color: HUES[0].hex };
 const botField = (name) => $("bot-form").elements.namedItem(name);
 
-function openBotDialog() {
+// Opens the voice dialog for a new bot, or with `existing` to change one (the name stays).
+function openBotDialog(existing) {
+  editing = existing?.name ? existing : null;
   $("bot-form").reset();
-  draft = { traits: new Set(["Warm"]), color: HUES[team.bots.length % HUES.length].hex };
+  const words = editing ? editing.personality.split(/,\s*/).filter(Boolean) : ["Warm"];
+  draft = {
+    traits: new Set(words.filter((w) => TRAITS.includes(w))),
+    extra: words.filter((w) => !TRAITS.includes(w)), // personality words that aren't chips are kept
+    color: editing?.color ?? HUES[team.bots.length % HUES.length].hex,
+  };
   $("templates").replaceChildren(...TEMPLATES.map((t) => button("toggle", t.label, () => useTemplate(t))));
+  $("templates").parentElement.hidden = Boolean(editing);
+  $("bot-title").textContent = editing ? `Change ${editing.name}` : "New voice";
+  $("bot-save").textContent = editing ? "Save changes" : "Create voice";
+  botField("name").readOnly = Boolean(editing);
+  if (editing) {
+    botField("name").value = editing.name;
+    botField("role").value = editing.role;
+    botField("speed").value = editing.speed;
+  }
   renderTraits();
   renderSwatches();
+  renderBrains(editing?.provider || bot(team.main)?.provider || "anthropic", editing?.model ?? "");
   updatePreview();
-  $("speed-out").textContent = "1.0×";
+  $("speed-out").textContent = `${Number(botField("speed").value).toFixed(2).replace(/0$/, "")}×`;
   $("bot-error").textContent = "";
-  loadVoices();
+  loadVoices(editing?.voice);
   $("bot-dialog").showModal();
-  botField("name").focus();
+  (editing ? botField("role") : botField("name")).focus();
 }
 
-async function loadVoices() {
-  const fill = (voices) =>
-    $("voice-select").replaceChildren(...voices.map((v) => Object.assign(el("option"), { value: v.id, textContent: v.name })));
+// Thinks with: the provider and model for this bot. Models load live from the provider.
+function renderBrains(chosen, model) {
+  $("provider-select").replaceChildren(
+    ...providers.map((p) => Object.assign(el("option"), { value: p.id, textContent: p.ready ? p.name : `${p.name} (add its key)` })),
+  );
+  $("provider-select").value = chosen;
+  loadModels(model);
+}
+
+let modelsAsked = 0; // the latest list asked for wins
+async function loadModels(model) {
+  const p = brainOf({ provider: $("provider-select").value });
+  const field = $("model-input");
+  field.value = model || p?.model || "";
+  field.placeholder = p?.model || "Type the model's name";
+  const fill = (names) => $("model-options").replaceChildren(...names.map((n) => Object.assign(el("option"), { value: n })));
+  fill(p?.model ? [p.model] : []);
+  const can = p ? [p.web ? "Searches the web" : "No web search", p.tools ? "uses memory and reminders" : "no memory or reminders"].join(", ") : "";
+  $("brain-note").textContent = !p ? "" : p.ready ? `${can}.` : `Add your ${p.name} key in Setup to use it. ${can}.`;
+  if (!p?.ready) return;
+  const asked = ++modelsAsked;
+  try {
+    const names = await call.invoke("models", { provider: p.id });
+    if (asked !== modelsAsked || !names?.length) return;
+    fill(names);
+    if (!field.value) field.value = names[0];
+  } catch {
+    // the list couldn't load; typing a model's name still works
+  }
+}
+$("provider-select").addEventListener("change", () => loadModels(""));
+
+async function loadVoices(selected) {
+  const fill = (voices) => {
+    const list = selected && !voices.some((v) => v.id === selected) ? [...voices, { id: selected, name: "Its current voice" }] : voices;
+    $("voice-select").replaceChildren(...list.map((v) => Object.assign(el("option"), { value: v.id, textContent: v.name })));
+    if (selected) $("voice-select").value = selected;
+  };
   fill(FALLBACK_VOICES);
   try {
     const listed = await call.invoke("voices");
@@ -902,14 +978,20 @@ $("bot-form").addEventListener("input", (e) => {
 $("bot-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const newBot = {
-    name: botField("name").value.trim(),
+    name: editing ? editing.name : botField("name").value.trim(),
     role: botField("role").value.trim(),
-    personality: [...draft.traits].join(", ") || "Friendly and clear",
+    personality: [...draft.traits, ...draft.extra].join(", ") || "Friendly and clear",
     voice: botField("voice").value,
     speed: Number(botField("speed").value),
     color: draft.color,
+    provider: $("provider-select").value || "anthropic",
+    model: $("model-input").value.trim(),
   };
-  const error = !newBot.name
+  const error = editing
+    ? !newBot.role
+      ? "Say what it's for."
+      : ""
+    : !newBot.name
     ? "Give your voice a name."
     : same(newBot.name, "you")
       ? "Pick another name: “You” is you."
@@ -923,12 +1005,12 @@ $("bot-form").addEventListener("submit", async (e) => {
     return;
   }
   try {
-    await call.invoke("add_bot", { bot: newBot });
+    await call.invoke(editing ? "update_bot" : "add_bot", { bot: newBot });
   } catch (err) {
     $("bot-error").textContent = String(err);
     return;
   }
-  pendingOpen = `bot:${newBot.name}`;
+  if (!editing) pendingOpen = `bot:${newBot.name}`;
   $("bot-dialog").close();
 });
 
@@ -980,16 +1062,48 @@ $("group-form").addEventListener("submit", async (e) => {
 
 // Setup
 
+const VOICE_KEYS = [
+  { key: "DEEPGRAM_API_KEY", name: "Deepgram", help: "Listens when you talk. Needed for voice. Get a key at console.deepgram.com." },
+  { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", help: "Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers." },
+];
+
+// One service in Setup: its name, whether it's connected, what it's for, and where its key goes.
+function keyRow(name, state, help, fields) {
+  const row = el("div", "key");
+  const head = el("div", "key-head");
+  const pill = { connected: ["pill ok", "Connected"], missing: ["pill", "Missing"], optional: ["pill optional", "Optional"], local: ["pill optional", "No key needed"] }[state];
+  head.append(el("span", "key-name", name), el("span", pill[0], pill[1]));
+  row.append(head, el("p", "key-help", help));
+  for (const [field, placeholder, type = "password"] of fields) {
+    row.append(Object.assign(el("input"), { name: field, type, placeholder, autocomplete: "off", spellcheck: false }));
+    row.lastChild.setAttribute("aria-label", `${name}: ${placeholder}`);
+  }
+  return row;
+}
+
 function openSetup() {
   $("setup-form").reset();
   $("setup-error").textContent = "";
   $("setup-save").textContent = "Save and restart";
-  for (const [id, ok] of [["k-claude", keys.claude], ["k-deepgram", keys.deepgram], ["k-elevenlabs", keys.elevenlabs]]) {
-    $(id).textContent = ok ? "Connected" : "Missing";
-    $(id).classList.toggle("ok", ok);
-  }
-  $("k-xai").textContent = keys.xai ? "Connected" : "Optional";
-  $("k-xai").classList.toggle("ok", Boolean(keys.xai));
+  $("voice-keys").replaceChildren(
+    ...VOICE_KEYS.map((k) => keyRow(k.name, keys[k.key] ? "connected" : "missing", k.help, [[k.key, `Paste your ${k.name} key`]])),
+  );
+  const thinker = brainOf(bot(team.main));
+  $("brain-keys").replaceChildren(
+    ...providers.map((p) => {
+      const does = [p.web && "Searches the web.", p.id === "xai" && "Also gives every bot X search and Grok Imagine pictures."].filter(Boolean).join(" ");
+      if (!p.key) return keyRow(p.name, "local", `Runs models on this Mac. Install it from ${p.site}.`, []);
+      const state = p.ready ? "connected" : p === thinker ? "missing" : "optional";
+      const help = `${does} Get a key at ${p.site}.`.trim();
+      if (p.id === "custom") {
+        return keyRow(p.name, state, "Any server that speaks the OpenAI API: its address, and a key if it needs one.", [
+          ["CUSTOM_BASE_URL", "https://your-server/v1", "url"],
+          [p.key, "Its key (if it needs one)"],
+        ]);
+      }
+      return keyRow(p.name, state, help, [[p.key, `Paste your ${p.name} key`]]);
+    }),
+  );
   const print = voiceprint("voxen", ink(), 52, false);
   setPrint(print, "listening");
   $("setup-print").replaceChildren(print);
@@ -1016,7 +1130,8 @@ $("setup-form").addEventListener("submit", async (e) => {
 });
 
 $("setup").addEventListener("click", openSetup);
-$("new-bot").addEventListener("click", openBotDialog);
+$("new-bot").addEventListener("click", () => openBotDialog());
+$("edit").addEventListener("click", () => openBotDialog(bot(members(open)[0])));
 $("new-group").addEventListener("click", openGroupDialog);
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 // A closed dialog's prints stay in the page, so they stop moving.
@@ -1043,10 +1158,11 @@ async function start() {
   try {
     status = await call.invoke("status");
   } catch (e) {
-    status = { chat: false, voice: false, problem: String(e), keys, main: "", bots: [], groups: [] };
+    status = { chat: false, voice: false, problem: String(e), keys: {}, providers: [], main: "", bots: [], groups: [] };
   }
   team = { main: status.main, bots: status.bots, groups: status.groups };
   keys = status.keys;
+  providers = status.providers;
   voiceReady = status.voice;
   paintMarks();
   renderRail();
@@ -1054,7 +1170,7 @@ async function start() {
   call.listen("call", (event) => onUpdate(event.payload));
   await openRoom(team.groups.length && !status.chat ? `group:${team.groups[0].name}` : "main");
   $("note").textContent = status.problem || "";
-  if (tauri && !keys.claude) openSetup(); // first run: straight to setup
+  if (tauri && !status.chat) openSetup(); // first run: straight to setup
 }
 
 start();

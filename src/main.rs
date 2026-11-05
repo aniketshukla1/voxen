@@ -5,7 +5,7 @@ use std::io::Write;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use voice_bots::audio;
 use voice_bots::call::{self, Command, Update};
-use voice_bots::claude::Claude;
+use voice_bots::llm::Brains;
 use voice_bots::team::Team;
 use voice_bots::tts::Voices;
 use voice_bots::xai::Xai;
@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     let (names, main) = (team.names(), team.main_bot().name.clone());
     let (commands, mut updates) = call::start(
         team,
-        Claude::from_env()?,
+        Brains::new(),
         Some(Voices::from_env()?),
         Some(audio::speaker()?),
         Xai::from_env().ok(),

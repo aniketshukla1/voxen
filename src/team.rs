@@ -19,6 +19,12 @@ pub struct Bot {
     /// The bot's colour in the app, as "#RRGGBB". Picked from the palette when missing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Who thinks for this bot: a provider from the list in `llm`, and one of its models
+    /// (empty for the provider's usual one).
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 /// A group chat: you and two or more bots, who take turns and react to each other.
@@ -30,6 +36,10 @@ pub struct Group {
 
 fn normal_speed() -> f32 {
     1.0
+}
+
+fn default_provider() -> String {
+    "anthropic".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +119,42 @@ impl Team {
         self.save("bot", &bot)?;
         self.bots.push(bot);
         Ok(())
+    }
+
+    /// Changes a bot, found by name, and saves the team file.
+    pub fn update_bot(&mut self, bot: Bot) -> Result<()> {
+        check_bot(&bot)?;
+        let at = self
+            .bots
+            .iter()
+            .position(|b| same(&b.name, &bot.name))
+            .with_context(|| format!("there's no bot called {}", bot.name))?;
+        let old = std::mem::replace(&mut self.bots[at], bot);
+        if let Err(e) = self.rewrite() {
+            self.bots[at] = old;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Writes the whole team file again, after a change to something already in it.
+    fn rewrite(&self) -> Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        #[derive(Serialize)]
+        struct File<'a> {
+            main: &'a str,
+            #[serde(rename = "bot")]
+            bots: &'a [Bot],
+            #[serde(rename = "group")]
+            groups: &'a [Group],
+        }
+        let file = File { main: &self.main, bots: &self.bots, groups: &self.groups };
+        let header = "# Voxen's team: your main bot, the bots you made and your group chats.\n\
+                      # The app keeps this file up to date, and you can edit it too.\n\n";
+        std::fs::write(path, format!("{header}{}", toml::to_string(&file)?))
+            .with_context(|| format!("saving {}", path.display()))
     }
 
     /// Adds a group chat and saves it to the team file.
@@ -233,6 +279,11 @@ fn check_bot(bot: &Bot) -> Result<()> {
         "\"You\" is how you appear in chats; pick another name"
     );
     ensure!(!bot.voice.trim().is_empty(), "{name} needs a voice");
+    ensure!(
+        crate::llm::find(&bot.provider).is_some(),
+        "{name} uses {}, which isn't a provider Voxen knows",
+        bot.provider
+    );
     // ElevenLabs accepts speeds from 0.7 to 1.2.
     ensure!(
         (0.7..=1.2).contains(&bot.speed),
@@ -294,6 +345,26 @@ bots = ["Maya", "Sam"]
     }
 
     #[test]
+    fn a_bot_can_switch_brains_and_it_is_saved() {
+        let dir = std::env::temp_dir().join(format!("voxen-team-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("team.toml");
+        std::fs::write(&path, TEAM).unwrap();
+        let mut team = Team::load(&path).unwrap();
+        assert_eq!(team.bot("Sam").unwrap().provider, "anthropic");
+        let mut sam = team.bot("sam").unwrap().clone();
+        sam.provider = "openai".into();
+        sam.model = "gpt-5.6".into();
+        team.update_bot(sam.clone()).unwrap();
+        let again = Team::load(&path).unwrap();
+        assert_eq!(again.bot("Sam").unwrap(), &sam);
+        assert_eq!(again.groups, team.groups);
+        sam.provider = "nobody".into();
+        assert!(team.update_bot(sam).is_err());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn who_answers() {
         let team = Team::parse(TEAM).unwrap();
         let all = team.names();
@@ -341,6 +412,8 @@ bots = ["Maya", "Sam"]
             voice: "v4".into(),
             speed: 1.0,
             color: Some("#FF8A65".into()),
+            provider: "google".into(),
+            model: "gemini-3.5-flash".into(),
         };
         team.add_bot(ava.clone()).unwrap();
         let bad_color = Bot {

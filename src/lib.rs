@@ -4,6 +4,7 @@
 pub mod audio;
 pub mod call;
 pub mod claude;
+pub mod llm;
 pub mod stt;
 pub mod team;
 pub mod tools;
