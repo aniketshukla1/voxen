@@ -81,6 +81,11 @@ impl Team {
         Ok(team)
     }
 
+    /// The folder the team file is in, where the bots keep their data.
+    pub fn dir(&self) -> Option<&Path> {
+        self.path.as_deref()?.parent()
+    }
+
     pub fn names(&self) -> Vec<String> {
         self.bots.iter().map(|b| b.name.clone()).collect()
     }

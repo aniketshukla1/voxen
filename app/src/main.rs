@@ -11,13 +11,16 @@ use voice_bots::audio::{self, Mic};
 use voice_bots::call::{self, Command};
 use voice_bots::claude::Claude;
 use voice_bots::team::{Bot, Group, Team};
+use voice_bots::tools::{Attachment, Mode};
 use voice_bots::tts::Voices;
+use voice_bots::xai::Xai;
 
 /// The keys Voxen uses, in the order the setup screen shows them.
-const KEY_NAMES: [&str; 3] = [
+const KEY_NAMES: [&str; 4] = [
     "ANTHROPIC_API_KEY",
     "DEEPGRAM_API_KEY",
     "ELEVENLABS_API_KEY",
+    "XAI_API_KEY",
 ];
 
 /// What the window needs when it opens.
@@ -41,6 +44,8 @@ struct Keys {
     claude: bool,
     deepgram: bool,
     elevenlabs: bool,
+    /// Optional: X search and pictures.
+    xai: bool,
 }
 
 #[derive(Serialize)]
@@ -94,7 +99,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, open, send, stop, clear, voice, add_bot, add_group, voices, save_keys
+            status, open, send, attach, mode, stop, clear, voice, add_bot, add_group, voices,
+            save_keys, open_link
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -114,6 +120,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         claude: key_set(KEY_NAMES[0]),
         deepgram: key_set(KEY_NAMES[1]),
         elevenlabs: key_set(KEY_NAMES[2]),
+        xai: key_set(KEY_NAMES[3]),
     };
     let team = match Team::load(root.join("team.toml")) {
         Ok(team) => team,
@@ -150,7 +157,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
     let speaker = voices.as_ref().and_then(|_| audio::speaker().ok());
     status.chat = true;
     status.voice = speaker.is_some() && status.keys.deepgram;
-    let (commands, mut updates) = call::start(team, claude, voices, speaker);
+    let (commands, mut updates) = call::start(team, claude, voices, speaker, Xai::from_env().ok());
     tauri::async_runtime::spawn(async move {
         while let Some(update) = updates.recv().await {
             app.emit("call", update).ok();
@@ -179,6 +186,31 @@ fn open(chat: String, state: State<'_, CallState>) -> Result<(), String> {
 #[tauri::command]
 fn send(text: String, state: State<'_, CallState>) -> Result<(), String> {
     state.tell(Command::Typed(text))
+}
+
+/// Files for the bots to look at with your next turn.
+#[tauri::command]
+fn attach(files: Vec<Attachment>, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::Attach(files))
+}
+
+/// Quick, Think or Research, for the replies from now on.
+#[tauri::command]
+fn mode(mode: Mode, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::Mode(mode))
+}
+
+/// Opens a source link in your browser. Only web links, so a reply can't open anything else.
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Only web links open.".into());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't open the link: {e}"))
 }
 
 #[tauri::command]

@@ -41,10 +41,12 @@ const composer = $("composer");
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 
 let team = { main: "", bots: [], groups: [] };
-let keys = { claude: false, deepgram: false, elevenlabs: false };
+let keys = { claude: false, deepgram: false, elevenlabs: false, xai: false };
 let voiceReady = false;
 let open = "main";
 let voiceOn = false;
+let mode = "quick"; // quick, think or research
+let tray = []; // files waiting to go with your next turn
 let pendingOpen = null; // a room to open once its new voice or room shows up
 let hearing = null; // what you're saying, before your turn ends
 let demo = []; // timers of a running demo
@@ -229,9 +231,16 @@ function renderRail() {
 
 function markOpen() {
   document.querySelectorAll(".room-btn").forEach((r) => {
-    if (r.dataset.room === open) r.setAttribute("aria-current", "page");
-    else r.removeAttribute("aria-current");
+    if (r.dataset.room === open) {
+      r.setAttribute("aria-current", "page");
+      r.classList.remove("unread");
+    } else r.removeAttribute("aria-current");
   });
+}
+
+// A room with something new you haven't seen.
+function markUnread(room) {
+  document.querySelector(`.room-btn[data-room="${CSS.escape(room)}"]`)?.classList.add("unread");
 }
 
 function renderSetup() {
@@ -335,10 +344,43 @@ function whoColumn(name, time) {
   return { who, meta };
 }
 
-function yourLine(text) {
+function yourLine(text, files = []) {
   const line = el("div", "line you now");
-  line.append(whoColumn("You", now()).who, el("div", "said", text));
+  const body = el("div", "body");
+  body.append(el("div", "said", text));
+  if (files.length) {
+    const strip = el("div", "files");
+    for (const f of files) {
+      if (!f.preview) strip.append(el("span", "chip-file", f.name));
+      else strip.append(Object.assign(el("img"), { src: f.preview, alt: f.name }));
+    }
+    body.append(strip);
+  }
+  line.append(whoColumn("You", now()).who, body);
   return line;
+}
+
+const host = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function sourceLink(source, i) {
+  const a = el("a", "source");
+  a.href = source.url;
+  a.title = source.title;
+  a.dataset.url = source.url;
+  a.append(el("b", "", String(i + 1)), host(source.url));
+  return a;
+}
+
+function picture(url, prompt) {
+  const img = Object.assign(el("img", "picture"), { src: url, alt: prompt, title: "Open full size" });
+  img.dataset.url = url;
+  return img;
 }
 
 function botLine(name) {
@@ -354,10 +396,14 @@ function botLine(name) {
   });
   const tools = el("div", "tools");
   tools.append(copy);
+  // What it did with its tools, then what it said, pictures it made and the pages behind it.
+  const steps = el("ul", "steps");
+  const media = el("div", "media");
+  const sources = el("div", "sources");
   const body = el("div", "body");
-  body.append(said, tools);
+  body.append(steps, said, media, sources, tools);
   line.append(who, body);
-  return { bot: name, line, said, meta };
+  return { bot: name, line, said, meta, steps, media, sources };
 }
 
 // Appends text a word at a time, each word fading in.
@@ -452,7 +498,8 @@ function onUpdate(u) {
         clearHearing();
         setPrint($("you").firstChild, voiceOn ? "listening" : "idle");
       }
-      addLine(room, yourLine(u.text));
+      // The files in the tray went with this turn.
+      addLine(room, yourLine(u.text, here && !u.demo ? takeTray() : []));
       break;
     case "hearing":
       if (!here) break;
@@ -467,6 +514,7 @@ function onUpdate(u) {
     case "start":
       lives[room] = botLine(u.bot);
       addLine(room, lives[room].line);
+      if (!here) markUnread(room);
       if (here) {
         if (lastSpeaker[room] && !same(lastSpeaker[room], u.bot)) passTurn(lastSpeaker[room], u.bot);
         castState(u.bot, "thinking");
@@ -501,6 +549,23 @@ function onUpdate(u) {
         refreshQuiet();
         castState(null, "idle");
       }
+      break;
+    case "step":
+      live?.steps.append(el("li", "step", u.text));
+      if (here) {
+        castState(u.bot, "thinking");
+        $("status").textContent = u.text;
+      }
+      break;
+    case "sources":
+      live?.sources.replaceChildren(...u.sources.map(sourceLink));
+      break;
+    case "image":
+      live?.media.append(picture(u.url, u.prompt));
+      break;
+    case "task":
+      addLine(room, el("p", "notice task", `Reminder for ${u.bot}: ${u.task}`));
+      if (!here) markUnread(room);
       break;
     case "problem":
       note(room, u.text);
@@ -540,6 +605,17 @@ const DEMO_LINES = [
   "Quick reality check: Alfama hotels run about 140 euros a night in spring, so plan on roughly 850 for two, food included. Book Pena Palace early, it sells out.",
   "And if it rains on Saturday, swap Belém for the tile museum. Same side of town, no umbrellas needed.",
 ];
+const DEMO_STEPS = ["Searching the web for “Lisbon long weekend itinerary”", "Searching the web for “Alfama hotel prices in spring”"];
+const DEMO_SOURCES = [
+  [
+    { url: "https://www.visitlisboa.com/en", title: "Visit Lisboa" },
+    { url: "https://www.timeout.com/lisbon", title: "Time Out Lisbon" },
+  ],
+  [
+    { url: "https://www.booking.com/city/pt/lisbon.html", title: "Hotels in Lisbon" },
+    { url: "https://www.parquesdesintra.pt/en/", title: "Parques de Sintra" },
+  ],
+];
 
 let demoRoom = ""; // where the demo plays
 const demoed = new Set(); // rooms showing a demo, wiped once a real conversation starts there
@@ -559,14 +635,16 @@ function runDemo() {
   let at = 300;
   const later = (ms, fn) => demo.push(setTimeout(fn, (at += ms)));
   later(0, () => {
-    onUpdate({ chat: room, kind: "you", text: "Plan a long weekend in Lisbon for two. Mid-range budget." });
+    onUpdate({ chat: room, kind: "you", text: "Plan a long weekend in Lisbon for two. Mid-range budget.", demo: true });
     demoed.add(room);
   });
   DEMO_LINES.slice(0, Math.max(1, Math.min(3, cast.length))).forEach((text, i) => {
     const who = cast[i % cast.length];
     later(900, () => onUpdate({ chat: room, kind: "start", bot: who }));
+    if (DEMO_STEPS[i]) later(400, () => onUpdate({ chat: room, kind: "step", bot: who, text: DEMO_STEPS[i] }));
     later(1100, () => onUpdate({ chat: room, kind: "first_audio", bot: who, ms: 620 + i * 40 }));
     for (const word of text.split(/(?<=\s)/)) later(85, () => onUpdate({ chat: room, kind: "text", bot: who, text: word }));
+    if (DEMO_SOURCES[i]) later(200, () => onUpdate({ chat: room, kind: "sources", bot: who, sources: DEMO_SOURCES[i] }));
     later(500, () => onUpdate({ chat: room, kind: "done", bot: who }));
   });
   later(0, () => (demo = []));
@@ -577,12 +655,125 @@ function runDemo() {
 function grow() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
-  composer.classList.toggle("typed", input.value.trim().length > 0);
+  composer.classList.toggle("typed", input.value.trim().length > 0 || tray.length > 0);
 }
+
+// Attachments: pictures, PDFs and text files, by button, drop or paste. They go with your
+// next turn, typed or spoken.
+
+const PICTURES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const TEXT_FILE = /\.(txt|md|csv|tsv|json|xml|ya?ml|log)$/i;
+
+function readFile(file, asText) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    if (asText) reader.readAsText(file);
+    else reader.readAsDataURL(file);
+  });
+}
+
+async function addFiles(files) {
+  for (const file of files) {
+    const isPicture = PICTURES.includes(file.type);
+    const isPdf = file.type === "application/pdf";
+    const isText = !isPicture && !isPdf && (file.type.startsWith("text/") || TEXT_FILE.test(file.name));
+    const limit = isPicture ? 5 : 20; // MB that Claude takes
+    if (!isPicture && !isPdf && !isText) {
+      note(open, `${file.name}: Voxen reads pictures, PDFs and text files.`);
+      continue;
+    }
+    if (file.size > limit * 1024 * 1024) {
+      note(open, `${file.name} is over ${limit} MB.`);
+      continue;
+    }
+    const result = await readFile(file, isText).catch(() => null);
+    if (result == null) continue;
+    tray.push({
+      name: file.name,
+      media_type: isText ? "text/plain" : file.type,
+      data: isText ? result : result.slice(result.indexOf(",") + 1),
+      preview: isPicture ? result : "",
+    });
+  }
+  syncTray();
+}
+
+// Shows the tray and tells the conversations, so a spoken turn takes the files too.
+function syncTray() {
+  $("tray").replaceChildren(
+    ...tray.map((f, i) => {
+      const chip = el("span", "chip-file");
+      if (f.preview) chip.append(Object.assign(el("img"), { src: f.preview, alt: "" }));
+      chip.append(el("span", "fname", f.name));
+      const remove = button("unattach", "×", () => {
+        tray.splice(i, 1);
+        syncTray();
+      });
+      remove.setAttribute("aria-label", `Remove ${f.name}`);
+      chip.append(remove);
+      return chip;
+    }),
+  );
+  grow();
+  const files = tray.map(({ name, media_type, data }) => ({ name, media_type, data }));
+  call.invoke("attach", { files }).catch(() => {});
+}
+
+function takeTray() {
+  const sent = tray;
+  tray = [];
+  syncTray();
+  return sent;
+}
+
+$("attach").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => {
+  addFiles([...e.target.files]);
+  e.target.value = "";
+});
+input.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (files.length) {
+    e.preventDefault();
+    addFiles(files);
+  }
+});
+stage.addEventListener("dragover", (e) => {
+  if (![...e.dataTransfer.types].includes("Files")) return;
+  e.preventDefault();
+  stage.classList.add("dropping");
+});
+stage.addEventListener("dragleave", (e) => {
+  if (!stage.contains(e.relatedTarget)) stage.classList.remove("dropping");
+});
+stage.addEventListener("drop", (e) => {
+  e.preventDefault();
+  stage.classList.remove("dropping");
+  addFiles([...e.dataTransfer.files]);
+});
+
+// Think and Research: how hard the bots work on replies, until you switch back.
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll(".mode").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  call.invoke("mode", { mode }).catch(() => {});
+}
+document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", () => setMode(mode === b.dataset.mode ? "quick" : b.dataset.mode)));
+
+// Source links and pictures open in your browser, never inside Voxen.
+document.addEventListener("click", (e) => {
+  const link = e.target.closest("[data-url]");
+  if (!link) return;
+  e.preventDefault();
+  if (tauri) call.invoke("open_link", { url: link.dataset.url }).catch((err) => note(open, String(err)));
+  else window.open(link.dataset.url, "_blank", "noopener");
+});
 
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
-  const text = input.value.trim();
+  const text = input.value.trim() || (tray.length ? "Take a look at this." : "");
   if (!text) return;
   input.value = "";
   grow();
@@ -806,6 +997,8 @@ function openSetup() {
     $(id).textContent = ok ? "Connected" : "Missing";
     $(id).classList.toggle("ok", ok);
   }
+  $("k-xai").textContent = keys.xai ? "Connected" : "Optional";
+  $("k-xai").classList.toggle("ok", Boolean(keys.xai));
   const print = voiceprint("voxen", ink(), 64, false);
   setPrint(print, "listening");
   $("setup-print").replaceChildren(print);

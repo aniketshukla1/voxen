@@ -8,6 +8,7 @@ use voice_bots::call::{self, Command, Update};
 use voice_bots::claude::Claude;
 use voice_bots::team::Team;
 use voice_bots::tts::Voices;
+use voice_bots::xai::Xai;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,6 +22,7 @@ async fn main() -> Result<()> {
         Claude::from_env()?,
         Some(Voices::from_env()?),
         Some(audio::speaker()?),
+        Xai::from_env().ok(),
     );
     commands.send(Command::Speak(true)).ok();
     let _mic = call::listen(deepgram_key, names, commands.clone())?;
@@ -55,6 +57,14 @@ fn show(update: Update) {
         } => println!(" [cut off; heard you after {ms} ms]"),
         Update::Cut { after_ms: None, .. } => println!(" [cut off]"),
         Update::FirstAudio { ms, .. } => eprint!(" ({ms} ms to first audio) "),
+        Update::Step { text, .. } => eprint!(" ({text}) "),
+        Update::Sources { sources, .. } => {
+            for page in sources {
+                println!("  - {} <{}>", page.title, page.url);
+            }
+        }
+        Update::Image { url, .. } => println!("\n[picture: {url}]"),
+        Update::Task { bot, task } => println!("\n[{bot}, scheduled: {task}]"),
         Update::Problem { text } => eprintln!("({text})"),
         Update::Hearing { .. } | Update::Team { .. } => {}
     }

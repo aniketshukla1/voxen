@@ -19,6 +19,7 @@ Voxen restarts with them. Typing needs only the Claude key; voice needs all thre
    - Claude (text and voice): console.anthropic.com → API keys
    - Listening (voice): console.deepgram.com → API keys
    - Voices (voice): elevenlabs.io → Developers → API keys
+   - Optional, for X search and pictures: console.x.ai → API keys
 2. `cp .env.example .env` and paste the keys into `.env`, then reopen the app.
 3. Check each key on its own: `cargo test -- --ignored`
 4. For voice, put headphones on (through speakers the bots hear themselves and stop).
@@ -35,9 +36,23 @@ Maya is the main bot. Create more bots and group chats with the + buttons in the
 In a group chat the bots take turns and react to each other. Everything is saved in
 [team.toml](team.toml), which you can also edit by hand.
 
+## What the bots can do
+
+| Ask | What happens |
+|---|---|
+| "What's the weather in Lisbon tomorrow?" | Searches the web and reads pages; the sources show under the answer. |
+| "Remember I'm vegetarian." | Every bot knows it in later chats. Saved in `data/memory.md`, which you can edit. |
+| "Remind me to call Mum at 6" / "Every morning at 8, brief me on the news" | The bot does it at that time, out loud. Saved in `data/tasks.json`. |
+| Attach a picture, PDF or text file (button, drag or paste) | The bots look at it with your next message, typed or spoken. |
+| **Think** / **Research** next to the message box | Harder thinking, or deep research across many sources. |
+| "What are people on X saying about…" / "Make a picture of…" | Grok's X search and Grok Imagine. Needs an xAI key (optional, in Setup); pictures are saved in `data/pictures/`. |
+
+`data/` is personal and never committed.
+
 ## Code
 
-`src/lib.rs` is our own SDK: clients for Claude, Deepgram and ElevenLabs, audio,
-turn-taking, the team, and the call engine (`src/call.rs`) both front-ends share.
+`src/lib.rs` is our own SDK: clients for Claude, Deepgram, ElevenLabs and xAI, audio,
+turn-taking, the team, the bots' tools (`src/tools.rs`), and the call engine
+(`src/call.rs`) both front-ends share.
 `app/` is the Mac app (Tauri, with the window in `app/ui/`); `src/main.rs` is the terminal
 version. `cargo test` runs offline.

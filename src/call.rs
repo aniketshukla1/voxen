@@ -1,19 +1,25 @@
 //! Conversations with your bots: the chat you have open (your main bot, one of your bots, or a
-//! group), who answers, replies streaming in, bots taking turns in a group, and cut-ins.
+//! group), who answers, replies streaming in, bots taking turns in a group, cut-ins, the
+//! bots' tools, and reminders that fire on their own.
 //! A front-end (the terminal, the app window) sends it commands and shows its updates.
 
 use crate::audio::{self, Mic, Speaker};
-use crate::claude::{Claude, Event};
+use crate::claude::{Claude, Event, Source};
 use crate::stt::{self, Heard};
 use crate::team::{self, Bot, Group, Team};
+use crate::tools::{self, Attachment, Memory, Mode, Task, Tasks};
 use crate::tts::{self, Voices};
 use crate::turn::{self, Action, Turns};
-use anyhow::Result;
+use crate::xai::Xai;
+use anyhow::{Context, Result, bail, ensure};
+use chrono::Local;
 use futures::StreamExt;
 use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task::{JoinError, JoinHandle};
@@ -39,6 +45,11 @@ pub enum Command {
     Speak(bool),
     /// Forget the open chat's conversation.
     Clear,
+    /// Files for the bots to look at with your next turn, typed or spoken. Replaces any
+    /// attached before.
+    Attach(Vec<Attachment>),
+    /// How bots work on replies from now on.
+    Mode(Mode),
     AddBot(Bot),
     AddGroup(Group),
     /// Something outside the conversations went wrong, to pass on as an update.
@@ -65,12 +76,24 @@ pub enum Update {
     Start { bot: String },
     /// More of the bot's reply.
     Text { bot: String, text: String },
+    /// What the bot is doing with a tool, like "Searching the web for …".
+    Step { bot: String, text: String },
+    /// The pages behind the bot's reply.
+    Sources { bot: String, sources: Vec<Source> },
+    /// A picture the bot made.
+    Image {
+        bot: String,
+        url: String,
+        prompt: String,
+    },
     /// The bot finished.
     Done { bot: String },
     /// You cut the bot off; `after_ms` is how long it took to notice you talking.
     Cut { bot: String, after_ms: Option<u64> },
     /// Time from the end of your turn to the bot's first sound.
     FirstAudio { bot: String, ms: u64 },
+    /// A reminder or repeating task is due; the bot's reply follows.
+    Task { bot: String, task: String },
     /// Your bots and group chats, after a change.
     Team {
         main: String,
@@ -82,23 +105,33 @@ pub enum Update {
 }
 
 /// Starts the conversations on the current Tokio runtime. Send commands in, read updates out.
-/// Without `voices` and `speaker` it still works, as text chat.
+/// Without `voices` and `speaker` it still works, as text chat; without `xai` the bots can't
+/// search X or make pictures.
 pub fn start(
     team: Team,
     claude: Claude,
     voices: Option<Voices>,
     speaker: Option<Speaker>,
+    xai: Option<Xai>,
 ) -> (
     mpsc::UnboundedSender<Command>,
     mpsc::UnboundedReceiver<ChatUpdate>,
 ) {
     let (command_tx, commands) = mpsc::unbounded_channel();
     let (updates, update_rx) = mpsc::unbounded_channel();
+    // ponytail: data sits next to the team file; move it to Application Support when the app ships.
+    let data = team.dir().map(|dir| dir.join("data"));
+    let file = |name: &str| data.as_ref().map(|dir| dir.join(name));
     let shared = Arc::new(Shared {
+        memory: Mutex::new(Memory::load(file("memory.md"))),
+        tasks: Mutex::new(Tasks::load(file("tasks.json"))),
+        pictures: file("pictures"),
+        timezone: tools::timezone(),
         team: RwLock::new(team),
         claude,
         voices,
         speaker,
+        xai,
         updates,
     });
     tokio::spawn(run(shared, commands));
@@ -157,6 +190,13 @@ struct Shared {
     claude: Claude,
     voices: Option<Voices>,
     speaker: Option<Speaker>,
+    xai: Option<Xai>,
+    memory: Mutex<Memory>,
+    tasks: Mutex<Tasks>,
+    /// Where pictures the bots make are saved.
+    pictures: Option<PathBuf>,
+    /// For local search results.
+    timezone: Option<String>,
     updates: mpsc::UnboundedSender<ChatUpdate>,
 }
 
@@ -200,6 +240,10 @@ impl Shared {
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A bot's reply in progress.
 struct Reply {
     chat: String,
@@ -214,6 +258,8 @@ struct Reply {
 struct Chat {
     history: Vec<(String, String)>,
     last_bot: Option<String>,
+    /// Files you attached this round, as message content.
+    files: Vec<Value>,
 }
 
 #[derive(Default)]
@@ -226,6 +272,9 @@ struct State {
     queue: Vec<String>,
     last_word_end: f64,
     speak: bool,
+    mode: Mode,
+    /// Files waiting to go with your next turn.
+    attached: Vec<Attachment>,
 }
 
 async fn run(shared: Arc<Shared>, mut commands: mpsc::UnboundedReceiver<Command>) {
@@ -233,6 +282,7 @@ async fn run(shared: Arc<Shared>, mut commands: mpsc::UnboundedReceiver<Command>
         open: MAIN.to_string(),
         ..State::default()
     };
+    let mut clock = tokio::time::interval(Duration::from_secs(15));
     loop {
         tokio::select! {
             command = commands.recv() => match command {
@@ -240,6 +290,7 @@ async fn run(shared: Arc<Shared>, mut commands: mpsc::UnboundedReceiver<Command>
                 None => break,
             },
             result = finished(&mut state.reply) => state.finish(&shared, result),
+            _ = clock.tick() => state.tick(&shared),
         }
     }
     state.cut(&shared, None);
@@ -266,6 +317,22 @@ fn after(members: &[String], first: &str) -> Vec<String> {
         .take(members.len().saturating_sub(1))
         .cloned()
         .collect()
+}
+
+/// Who's in a chat.
+fn members(shared: &Shared, chat: &str) -> Vec<String> {
+    let team = shared.team();
+    if let Some(name) = chat.strip_prefix("bot:")
+        && let Some(bot) = team.bot(name)
+    {
+        return vec![bot.name.clone()];
+    }
+    if let Some(name) = chat.strip_prefix("group:")
+        && let Some(group) = team.group(name)
+    {
+        return group.bots.clone();
+    }
+    vec![team.main_bot().name.clone()]
 }
 
 impl State {
@@ -296,28 +363,14 @@ impl State {
                 self.cut(shared, None);
                 self.chats.remove(&self.open);
             }
+            Command::Attach(files) => self.attached = files,
+            Command::Mode(mode) => self.mode = mode,
             Command::AddBot(bot) => shared.change_team(&self.open, |team| team.add_bot(bot)),
             Command::AddGroup(group) => {
                 shared.change_team(&self.open, |team| team.add_group(group))
             }
             Command::Problem(text) => shared.send(&self.open, Update::Problem { text }),
         }
-    }
-
-    /// Who's in the open chat.
-    fn members(&self, shared: &Shared) -> Vec<String> {
-        let team = shared.team();
-        if let Some(name) = self.open.strip_prefix("bot:")
-            && let Some(bot) = team.bot(name)
-        {
-            return vec![bot.name.clone()];
-        }
-        if let Some(name) = self.open.strip_prefix("group:")
-            && let Some(group) = team.group(name)
-        {
-            return group.bots.clone();
-        }
-        vec![team.main_bot().name.clone()]
     }
 
     fn talking(&self, shared: &Shared) -> bool {
@@ -355,21 +408,56 @@ impl State {
         self.cut(shared, None);
         let chat = self.open.clone();
         shared.send(&chat, Update::You { text: said.clone() });
-        let members = self.members(shared);
-        let entry = self.chats.entry(chat).or_default();
+        let files = std::mem::take(&mut self.attached);
+        let mut line = said.clone();
+        if !files.is_empty() {
+            let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+            line.push_str(&format!(" [attached: {}]", names.join(", ")));
+        }
+        let members = members(shared, &chat);
+        let entry = self.chats.entry(chat.clone()).or_default();
         let first = shared
             .team()
             .pick(&said, entry.last_bot.as_deref(), &members)
             .name
             .clone();
-        entry.history.push(("You".into(), said));
+        entry.history.push(("You".into(), line));
+        entry.files = files.iter().map(Attachment::block).collect();
         self.queue = after(&members, &first);
-        self.start(shared, first, started);
+        self.start(shared, &chat, first, started, self.speak);
     }
 
-    fn start(&mut self, shared: &Arc<Shared>, name: String, started: Instant) {
-        let chat = self.open.clone();
-        let members = self.members(shared);
+    /// Starts a reminder or repeating task that's due, when nobody is talking.
+    fn tick(&mut self, shared: &Arc<Shared>) {
+        if self.talking(shared) || !self.queue.is_empty() {
+            return;
+        }
+        let Some(task) = lock(&shared.tasks).take_due(Local::now()) else {
+            return;
+        };
+        shared.send(
+            &task.chat,
+            Update::Task {
+                bot: task.bot.clone(),
+                task: task.task.clone(),
+            },
+        );
+        let entry = self.chats.entry(task.chat.clone()).or_default();
+        entry.history.push(("Scheduled task".into(), task.task));
+        entry.files.clear();
+        // A reminder is said out loud even with the mic off.
+        self.start(shared, &task.chat, task.bot, Instant::now(), true);
+    }
+
+    fn start(
+        &mut self,
+        shared: &Arc<Shared>,
+        chat: &str,
+        name: String,
+        started: Instant,
+        speak: bool,
+    ) {
+        let members = members(shared, chat);
         let (bot, prompt) = {
             let team = shared.team();
             let Some(bot) = team.bot(&name).cloned() else {
@@ -380,22 +468,27 @@ impl State {
                 .filter(|m| !m.eq_ignore_ascii_case(&bot.name))
                 .filter_map(|m| team.bot(m))
                 .collect();
-            let prompt = team.instructions(&bot, &others, self.speak);
+            let prompt = team.instructions(&bot, &others, speak);
             (bot, prompt)
         };
-        let entry = self.chats.entry(chat.clone()).or_default();
+        let facts = lock(&shared.memory).facts.clone();
+        let prompt = prompt + &tools::guidance(self.mode, &facts, Local::now(), shared.xai.is_some());
+        let entry = self.chats.entry(chat.to_string()).or_default();
         entry.last_bot = Some(bot.name.clone());
+        let mut content = entry.files.clone();
+        content.push(json!({"type": "text", "text": team::transcript(&entry.history)}));
         let job = Job {
-            chat: chat.clone(),
-            transcript: team::transcript(&entry.history),
+            chat: chat.to_string(),
+            content,
             prompt,
             heard: Arc::new(Mutex::new(String::new())),
             started,
-            speak: self.speak,
+            speak,
+            mode: self.mode,
             bot: bot.clone(),
         };
         shared.send(
-            &chat,
+            chat,
             Update::Start {
                 bot: bot.name.clone(),
             },
@@ -403,7 +496,7 @@ impl State {
         let heard = job.heard.clone();
         let task = tokio::spawn(reply(shared.clone(), job));
         self.reply = Some(Reply {
-            chat,
+            chat: chat.to_string(),
             bot: bot.name,
             heard,
             task,
@@ -477,7 +570,7 @@ impl State {
         }
         if done.chat == self.open && !self.queue.is_empty() {
             let next = self.queue.remove(0);
-            self.start(shared, next, Instant::now());
+            self.start(shared, &done.chat, next, Instant::now(), self.speak);
         }
     }
 }
@@ -487,21 +580,20 @@ struct Job {
     chat: String,
     bot: Bot,
     prompt: String,
-    transcript: String,
+    /// The user message: files attached this round, then the conversation so far.
+    content: Vec<Value>,
     heard: Arc<Mutex<String>>,
     started: Instant,
     speak: bool,
+    mode: Mode,
 }
 
 /// Streams a bot's reply from Claude, showing it as it arrives and, when `speak` is on,
-/// saying it sentence by sentence.
+/// saying it sentence by sentence. Runs the bot's tools until it has its answer.
 async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
-    let events = shared
-        .claude
-        .stream(&job.prompt, &job.transcript, &[])
-        .await?;
-    let mut events = std::pin::pin!(events);
-    let mut mouth = job
+    let tools = tools::definitions(job.mode, shared.xai.is_some(), shared.timezone.as_deref());
+    let mut messages = vec![json!({"role": "user", "content": job.content})];
+    let mouth = job
         .speak
         .then(|| shared.voices.as_ref().zip(shared.speaker.as_ref()))
         .flatten()
@@ -515,41 +607,223 @@ async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
             previous: String::new(),
             first: true,
         });
-    let mut pending = String::new();
-    while let Some(event) = events.next().await {
-        match event? {
-            Event::Text(text) => {
-                let update = Update::Text {
-                    bot: job.bot.name.clone(),
-                    text: text.clone(),
-                };
-                shared.send(&job.chat, update);
-                match &mut mouth {
-                    Some(mouth) => {
-                        pending.push_str(&text);
-                        while let Some(sentence) = turn::take_sentence(&mut pending) {
-                            mouth.say(&sentence).await?;
-                            keep(&job.heard, &format!("{sentence} "));
-                        }
-                    }
-                    None => keep(&job.heard, &text),
+    let mut out = Out {
+        shared: &shared,
+        job: &job,
+        mouth,
+        pending: String::new(),
+        said: false,
+    };
+    let (mut cited, mut found) = (Vec::new(), Vec::new());
+    // ponytail: at most 8 rounds of tools per reply; raise it if deep research needs more.
+    for _ in 0..8 {
+        let events = shared
+            .claude
+            .stream(&job.prompt, &messages, &tools, job.mode.effort())
+            .await?;
+        let mut events = std::pin::pin!(events);
+        let (mut calls, mut end) = (Vec::new(), None);
+        while let Some(event) = events.next().await {
+            match event? {
+                Event::Text(text) => out.text(&text).await?,
+                Event::Using { tool, input } => out.step(&tool, &input).await?,
+                Event::Found(pages) => add_new(&mut found, pages),
+                Event::Cited(page) => add_new(&mut cited, vec![page]),
+                Event::Tool { id, name, input } => {
+                    out.step(&name, &input).await?;
+                    calls.push((id, name, input));
                 }
+                Event::Done {
+                    stop_reason,
+                    content,
+                } => end = Some((stop_reason, content)),
             }
-            Event::Done { stop_reason } if stop_reason == "refusal" => {
+        }
+        let Some((stop_reason, content)) = end else {
+            break;
+        };
+        match stop_reason.as_str() {
+            "tool_use" => {
+                let mut results = Vec::new();
+                for (id, name, input) in calls {
+                    let (text, failed) = match use_tool(&shared, &job, &name, &input, &mut cited).await {
+                        Ok(text) => (text, false),
+                        Err(e) => (format!("{e:#}"), true),
+                    };
+                    results.push(json!({"type": "tool_result", "tool_use_id": id, "content": text, "is_error": failed}));
+                }
+                messages.push(json!({"role": "assistant", "content": content}));
+                messages.push(json!({"role": "user", "content": results}));
+            }
+            // A long run of searches paused on the server: send it back as it is to carry on.
+            "pause_turn" => messages.push(json!({"role": "assistant", "content": content})),
+            "refusal" => {
                 let text = format!("{} declined to answer that", job.bot.name);
                 shared.send(&job.chat, Update::Problem { text });
+                break;
             }
-            _ => {}
+            _ => break,
         }
     }
-    if let Some(mouth) = &mut mouth {
-        let rest = pending.trim();
-        if !rest.is_empty() {
-            mouth.say(rest).await?;
-            keep(&job.heard, rest);
-        }
+    out.finish().await?;
+    let sources = if cited.is_empty() {
+        found.into_iter().take(4).collect()
+    } else {
+        cited
+    };
+    if !sources.is_empty() {
+        let bot = job.bot.name.clone();
+        shared.send(&job.chat, Update::Sources { bot, sources });
     }
     Ok(())
+}
+
+fn add_new(list: &mut Vec<Source>, pages: Vec<Source>) {
+    for page in pages {
+        if !list.iter().any(|p| p.url == page.url) {
+            list.push(page);
+        }
+    }
+}
+
+/// Runs one of Voxen's own tools for a bot and returns what to tell it.
+async fn use_tool(
+    shared: &Shared,
+    job: &Job,
+    name: &str,
+    input: &Value,
+    cited: &mut Vec<Source>,
+) -> Result<String> {
+    ensure!(
+        !input.is_null(),
+        "The tool input wasn't valid JSON. Try the call again."
+    );
+    let text = |key: &str| input[key].as_str().unwrap_or_default().trim().to_string();
+    let xai = || {
+        shared
+            .xai
+            .as_ref()
+            .context("X search and pictures need an xAI key; the user can add one in Setup.")
+    };
+    match name {
+        "search_x" => {
+            let (summary, posts) = xai()?.search_x(&text("query")).await?;
+            let links: Vec<&str> = posts.iter().map(|p| p.url.as_str()).collect();
+            let reply = format!("{summary}\n\nPosts:\n{}", links.join("\n"));
+            add_new(cited, posts);
+            Ok(reply)
+        }
+        "create_image" => {
+            let prompt = text("prompt");
+            ensure!(!prompt.is_empty(), "describe the picture");
+            let (url, bytes) = xai()?.image(&prompt).await?;
+            let saved = save_picture(shared, &bytes);
+            let bot = job.bot.name.clone();
+            shared.send(&job.chat, Update::Image { bot, url, prompt });
+            Ok(match saved {
+                Some(path) => format!("The picture is in the chat now, saved at {}.", path.display()),
+                None => "The picture is in the chat now.".into(),
+            })
+        }
+        _ => local_tool(shared, job, name, input),
+    }
+}
+
+/// The tools that run on this Mac: memory and tasks.
+fn local_tool(shared: &Shared, job: &Job, name: &str, input: &Value) -> Result<String> {
+    let text = |key: &str| input[key].as_str().unwrap_or_default().to_string();
+    match name {
+        "remember" => lock(&shared.memory).remember(&text("fact")),
+        "forget" => lock(&shared.memory).forget(&text("words")),
+        "schedule" => {
+            let task = Task::new(&job.chat, &job.bot.name, input, Local::now())?;
+            lock(&shared.tasks).add(task)
+        }
+        "list_tasks" => Ok(lock(&shared.tasks).said()),
+        "cancel_task" => {
+            let number = input["number"].as_u64().unwrap_or(0) as usize;
+            lock(&shared.tasks).cancel(number)
+        }
+        other => bail!("There's no tool called {other}."),
+    }
+}
+
+/// Saves a picture a bot made, named by the time. Returns where, if it could.
+fn save_picture(shared: &Shared, bytes: &[u8]) -> Option<PathBuf> {
+    let dir = shared.pictures.as_ref()?;
+    let kind = if bytes.starts_with(b"\x89PNG") {
+        "png"
+    } else if bytes.starts_with(b"RIFF") {
+        "webp"
+    } else {
+        "jpg"
+    };
+    let path = dir.join(format!("{}.{kind}", Local::now().format("%Y-%m-%d at %H.%M.%S")));
+    std::fs::create_dir_all(dir).ok()?;
+    std::fs::write(&path, bytes).ok()?;
+    Some(path)
+}
+
+/// Where a reply goes: on screen, and out loud sentence by sentence on a call.
+struct Out<'a> {
+    shared: &'a Shared,
+    job: &'a Job,
+    mouth: Option<Mouth<'a>>,
+    pending: String,
+    /// Whether anything was said or shown yet.
+    said: bool,
+}
+
+impl Out<'_> {
+    async fn text(&mut self, text: &str) -> Result<()> {
+        self.said = true;
+        let update = Update::Text {
+            bot: self.job.bot.name.clone(),
+            text: text.to_string(),
+        };
+        self.shared.send(&self.job.chat, update);
+        match &mut self.mouth {
+            Some(mouth) => {
+                self.pending.push_str(text);
+                while let Some(sentence) = turn::take_sentence(&mut self.pending) {
+                    mouth.say(&sentence).await?;
+                    keep(&self.job.heard, &format!("{sentence} "));
+                }
+            }
+            None => keep(&self.job.heard, text),
+        }
+        Ok(())
+    }
+
+    /// Shows what the bot does with a tool. On a call, a slow tool gets a few words first,
+    /// so the line never goes quiet.
+    async fn step(&mut self, tool: &str, input: &Value) -> Result<()> {
+        let update = Update::Step {
+            bot: self.job.bot.name.clone(),
+            text: tools::step(tool, input),
+        };
+        self.shared.send(&self.job.chat, update);
+        if !self.said
+            && self.mouth.is_some()
+            && let Some(line) = tools::filler(tool)
+        {
+            self.text(&format!("{line} ")).await?;
+        }
+        Ok(())
+    }
+
+    /// Says whatever is left of the reply.
+    async fn finish(&mut self) -> Result<()> {
+        let rest = std::mem::take(&mut self.pending);
+        let rest = rest.trim();
+        if let Some(mouth) = &mut self.mouth
+            && !rest.is_empty()
+        {
+            mouth.say(rest).await?;
+            keep(&self.job.heard, rest);
+        }
+        Ok(())
+    }
 }
 
 fn keep(heard: &Mutex<String>, text: &str) {
@@ -622,7 +896,7 @@ bots = ["Maya", "Sam"]
     ) {
         // Nothing listens on port 9, so every Claude request fails at once, offline.
         let claude = Claude::new("test", "http://127.0.0.1:9", "claude-opus-5-5");
-        start(Team::parse(TEAM).unwrap(), claude, None, None)
+        start(Team::parse(TEAM).unwrap(), claude, None, None, None)
     }
 
     async fn next(updates: &mut mpsc::UnboundedReceiver<ChatUpdate>, n: usize) -> Vec<ChatUpdate> {
@@ -708,5 +982,48 @@ bots = ["Maya", "Sam"]
             serde_json::to_value(update).unwrap(),
             serde_json::json!({"chat": "main", "kind": "cut", "bot": "Sam", "after_ms": 280})
         );
+    }
+
+    #[tokio::test]
+    async fn local_tools_remember_and_schedule() {
+        let claude = Claude::new("test", "http://127.0.0.1:9", "claude-opus-5-5");
+        let (updates, _rx) = mpsc::unbounded_channel();
+        let shared = Shared {
+            team: RwLock::new(Team::parse(TEAM).unwrap()),
+            claude,
+            voices: None,
+            speaker: None,
+            xai: None,
+            memory: Mutex::default(),
+            tasks: Mutex::default(),
+            pictures: None,
+            timezone: None,
+            updates,
+        };
+        let job = Job {
+            chat: "main".into(),
+            bot: shared.team().main_bot().clone(),
+            prompt: String::new(),
+            content: Vec::new(),
+            heard: Arc::default(),
+            started: Instant::now(),
+            speak: false,
+            mode: Mode::Quick,
+        };
+        let mut cited = Vec::new();
+        let run = |name: &str, input: Value| {
+            let (shared, job) = (&shared, &job);
+            let name = name.to_string();
+            async move { use_tool(shared, job, &name, &input, &mut Vec::new()).await }
+        };
+        run("remember", json!({"fact": "Likes tea"})).await.unwrap();
+        assert_eq!(lock(&shared.memory).facts, ["Likes tea"]);
+        let soon = (Local::now() + chrono::Duration::hours(1)).format("%Y-%m-%d %H:%M");
+        let set = run("schedule", json!({"task": "Stretch", "at": soon.to_string(), "repeat": "never"}))
+            .await
+            .unwrap();
+        assert!(set.contains("Maya: Stretch"), "{set}");
+        assert!(run("search_x", json!({"query": "rust"})).await.unwrap_err().to_string().contains("xAI key"));
+        assert!(use_tool(&shared, &job, "remember", &Value::Null, &mut cited).await.is_err());
     }
 }

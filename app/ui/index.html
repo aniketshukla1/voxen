@@ -58,7 +58,16 @@
     <footer class="dock">
       <span id="you" class="you-print" aria-hidden="true"></span>
       <form id="composer" class="composer">
+        <div id="tray" class="tray" aria-label="Attached files"></div>
+        <button id="attach" class="bar-btn" type="button" aria-label="Attach pictures or files" title="Attach pictures, PDFs or text files">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>
+        </button>
+        <input id="file" type="file" multiple hidden accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/*,.md,.csv,.json">
         <textarea id="input" rows="1" placeholder="Talk, or type…" aria-label="Message"></textarea>
+        <div class="modes" aria-label="How to answer">
+          <button class="mode" type="button" data-mode="think" aria-pressed="false" title="Think harder before answering">Think</button>
+          <button class="mode" type="button" data-mode="research" aria-pressed="false" title="Search many sources and dig deep">Research</button>
+        </div>
         <button id="send" class="send" type="submit" aria-label="Send">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
         </button>
@@ -126,7 +135,7 @@
     <form id="setup-form" class="sheet" novalidate>
       <span id="setup-print" class="setup-print" aria-hidden="true"></span>
       <h2 id="setup-heading">Set up Voxen</h2>
-      <p class="sheet-sub">Voxen uses three services with your own keys. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
+      <p class="sheet-sub">Voxen runs on your own keys: three it needs, and xAI if you want Grok's tools too. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
       <div class="key">
         <div class="key-head"><span class="key-name">Claude</span><span id="k-claude" class="pill">Missing</span></div>
         <p class="key-help">Thinks and writes every line. Needed for anything. Get a key at console.anthropic.com.</p>
@@ -141,6 +150,11 @@
         <div class="key-head"><span class="key-name">ElevenLabs</span><span id="k-elevenlabs" class="pill">Missing</span></div>
         <p class="key-help">Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers.</p>
         <input name="ELEVENLABS_API_KEY" type="password" placeholder="Paste your ElevenLabs key" autocomplete="off" aria-label="ElevenLabs key">
+      </div>
+      <div class="key">
+        <div class="key-head"><span class="key-name">xAI</span><span id="k-xai" class="pill optional">Optional</span></div>
+        <p class="key-help">Adds Grok's own tools: searching X, and making pictures with Grok Imagine. Get a key at console.x.ai.</p>
+        <input name="XAI_API_KEY" type="password" placeholder="xai-…" autocomplete="off" aria-label="xAI key">
       </div>
       <p id="setup-error" class="form-error" role="alert"></p>
       <div class="sheet-actions">

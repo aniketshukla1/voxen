@@ -230,6 +230,20 @@ canvas.print { display: block; }
 .tool { height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: transparent; color: var(--text-3); font-size: 11.5px; }
 .tool:hover { color: var(--text); }
 .notice { max-width: 880px; margin: 8px auto 14px; padding: 10px 16px 10px 144px; color: var(--warn); font-size: 13px; }
+.notice.task { color: var(--text-2); }
+/* What a bot did with its tools, pictures it made, and the pages behind its answer */
+.steps { margin: 0 0 6px; padding: 0; list-style: none; font: 400 12px/1.6 var(--sans); color: var(--text-3); }
+.step::before { content: "↳ "; }
+.line.live .step:last-child { animation: blink 1.4s ease-in-out infinite; }
+.steps:empty, .media:empty, .sources:empty { display: none; }
+.media { margin-top: 12px; }
+.picture { display: block; max-width: min(440px, 100%); border: 1px solid var(--line); border-radius: var(--radius); cursor: zoom-in; }
+.sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.source { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 5px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2); font-size: 12px; text-decoration: none; }
+.source b { min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; background: var(--raise); color: var(--text-3); font: 650 10px/16px var(--sans); text-align: center; }
+.source:hover { color: var(--text); border-color: var(--text-3); }
+.files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.files img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--line); border-radius: calc(var(--radius) / 2); }
 
 /* An empty room */
 .welcome { display: none; }
@@ -254,20 +268,37 @@ canvas.print { display: block; }
 .you-print { width: 46px; height: 46px; flex-shrink: 0; display: grid; place-items: center; }
 .composer {
   flex: 1;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 6px 6px 6px 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 4px;
+  padding: 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
   transition: border-color 0.2s;
 }
 .composer:focus-within { border-color: var(--text-3); }
+/* Files waiting to go with your next turn */
+.tray { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 4px; }
+.tray:empty { display: none; }
+.chip-file { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 32px; padding: 0 2px 0 4px; border: 1px solid var(--line); border-radius: calc(var(--radius) / 2); color: var(--text-2); font-size: 12px; }
+.files .chip-file { padding-right: 10px; }
+.chip-file img { width: 24px; height: 24px; object-fit: cover; border-radius: 2px; }
+.fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unattach { width: 24px; height: 24px; border: 0; background: none; color: var(--text-3); font-size: 16px; line-height: 1; }
+.unattach:hover { color: var(--text); }
+.bar-btn { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: calc(var(--radius) / 2); background: transparent; color: var(--text-3); }
+.bar-btn:hover { color: var(--text); background: var(--raise); }
+/* Think and Research */
+.modes { display: flex; gap: 4px; padding-bottom: 5px; }
+.mode { height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: calc(var(--radius) / 2); background: transparent; color: var(--text-3); font-size: 12px; }
+.mode:hover { color: var(--text); }
+.mode[aria-pressed="true"] { border-color: var(--text); background: var(--raise); color: var(--text); }
+.stage.dropping::after { content: "Drop to attach"; position: absolute; z-index: 20; inset: 12px; display: grid; place-items: center; border: 1px dashed var(--text-3); border-radius: var(--radius); background: color-mix(in srgb, var(--bg) 85%, transparent); font: 400 26px var(--serif); pointer-events: none; }
 .composer textarea {
-  flex: 1;
   max-height: 160px;
-  padding: 9px 0;
+  padding: 9px 4px;
   resize: none;
   border: 0;
   outline: 0;
@@ -371,6 +402,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .key-help { margin: 0; color: var(--text-2); font-size: 12.5px; }
 .pill { margin-left: auto; padding: 3px 10px; border-radius: var(--radius); border: 1px solid var(--warn); color: var(--warn); font-size: 11px; font-weight: 650; }
 .pill.ok { border-color: var(--ok); color: var(--ok); }
+.pill.optional:not(.ok) { border-color: var(--line); color: var(--text-3); }
+.room-btn.unread .ico::after { content: ""; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--panel); }
 
 /* Light: hues get darker so names and voiceprints read on paper */
 @media (prefers-color-scheme: light) {
