@@ -587,7 +587,7 @@ function onUpdate(u) {
       live?.media.append(picture(u.url, u.prompt));
       break;
     case "task":
-      addLine(room, el("p", "notice task", `Reminder for ${u.bot}: ${u.task}`));
+      addLine(room, el("p", "notice task", `${u.bot}'s task: ${u.task}`));
       if (!here) markUnread(room);
       break;
     case "problem":

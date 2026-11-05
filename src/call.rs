@@ -428,7 +428,7 @@ impl State {
         self.start(shared, &chat, first, started, self.speak);
     }
 
-    /// Starts a reminder or repeating task that's due, when nobody is talking.
+    /// Starts a task that's due, when nobody is talking.
     fn tick(&mut self, shared: &Arc<Shared>) {
         if self.talking(shared) || !self.queue.is_empty() {
             return;
@@ -446,7 +446,7 @@ impl State {
         let entry = self.chats.entry(task.chat.clone()).or_default();
         entry.history.push(("Scheduled task".into(), task.task));
         entry.files.clear();
-        // A reminder is said out loud even with the mic off.
+        // A task's answer is said out loud even with the mic off.
         self.start(shared, &task.chat, task.bot, Instant::now(), true);
     }
 
@@ -744,6 +744,10 @@ fn local_tool(shared: &Shared, job: &Job, name: &str, input: &Value) -> Result<S
             lock(&shared.tasks).add(task)
         }
         "list_tasks" => Ok(lock(&shared.tasks).said()),
+        "change_task" => {
+            let number = input["number"].as_u64().unwrap_or(0) as usize;
+            lock(&shared.tasks).change(number, input, Local::now())
+        }
         "cancel_task" => {
             let number = input["number"].as_u64().unwrap_or(0) as usize;
             lock(&shared.tasks).cancel(number)

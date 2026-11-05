@@ -53,7 +53,7 @@ reminders work with every provider except Perplexity.
 |---|---|
 | "What's the weather in Lisbon tomorrow?" | Searches the web and reads pages; the sources show under the answer. |
 | "Remember I'm vegetarian." | Every bot knows it in later chats. Saved in `data/memory.md`, which you can edit. |
-| "Remind me to call Mum at 6" / "Every morning at 8, brief me on the news" | The bot does it at that time, out loud. Saved in `data/tasks.json`. |
+| "Every 2 hours, check the Bitcoin price" / "Every weekday at 8, brief me on the news" / "Remind me at 6 to call Mum" | Each bot runs its own tasks on its own, at any interval (every few minutes, hours, days, weeks, months or weekdays), and answers out loud in its chat. Say "pause it", "make it every 3 hours", "what tasks do I have?" or "cancel it" to manage them. Saved in `data/tasks.json`. |
 | Attach a picture, PDF or text file (button, drag or paste) | The bots look at it with your next message, typed or spoken. |
 | "Compare these three laptops for me" | Like Grok, every reply decides how much to think and research: quick questions stay quick, hard ones get deep research. |
 | "What are people on X saying about…" / "Make a picture of…" | Grok's X search and Grok Imagine. Needs an xAI key (optional, in Setup); pictures are saved in `data/pictures/`. |
