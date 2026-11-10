@@ -66,7 +66,7 @@ fn show(update: Update) {
         Update::Image { url, .. } => println!("\n[picture: {url}]"),
         Update::Task { bot, task } => println!("\n[{bot}, scheduled: {task}]"),
         Update::Problem { text } => eprintln!("({text})"),
-        Update::Hearing { .. } | Update::Team { .. } => {}
+        Update::Hearing { .. } | Update::Team { .. } | Update::Levels { .. } => {}
     }
     std::io::stdout().flush().ok();
 }

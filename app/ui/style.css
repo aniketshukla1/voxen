@@ -156,7 +156,11 @@ canvas.print { display: block; }
   pointer-events: none;
 }
 .member.on .glow::before { opacity: 0.5; transform: scale(0.9); }
-.member[data-state="speaking"] .glow::before, .preview-print::before { opacity: 1; transform: none; animation: breathe 1.8s ease-in-out infinite alternate; }
+/* Listening, the glow brightens and grows with your voice or typing; speaking, with the bot's voice */
+.member[data-state="listening"] { opacity: 0.9; }
+.member[data-state="listening"] .glow::before { opacity: calc(0.08 + var(--you, 0) * 1.1); transform: scale(calc(0.78 + var(--you, 0) * 0.32)); transition: opacity 0.12s, transform 0.12s; }
+.member[data-state="speaking"] .glow::before { opacity: calc(0.45 + var(--talk, 0.3) * 0.75); transform: scale(calc(0.88 + var(--talk, 0.3) * 0.26)); transition: opacity 0.1s, transform 0.1s; }
+.preview-print::before { opacity: 1; transform: none; animation: breathe 1.8s ease-in-out infinite alternate; }
 .stage.quiet .member { opacity: 1; }
 .member .n { font: 650 10.5px/1 var(--sans); letter-spacing: 0.18em; text-transform: uppercase; color: var(--c); }
 .member .s { min-height: 1em; font: 400 11.5px/1 var(--sans); color: var(--text-3); }
@@ -409,7 +413,7 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 
 /* Light: hues get darker so names and voiceprints read on paper */
 @media (prefers-color-scheme: light) {
-  canvas.print { filter: brightness(0.74) saturate(1.3); }
+  canvas.print:not(.body) { filter: brightness(0.74) saturate(1.3); }
   .line:not(.you) .who, .member .n, .welcome-line em { color: oklch(from var(--c) min(l, 0.5) c h); }
 }
 

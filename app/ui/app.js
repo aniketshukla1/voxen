@@ -84,10 +84,14 @@ function button(className, text, onClick) {
   return b;
 }
 
-// Voiceprints: a ring of bars shaped by a name, so every voice has its own mark. It sits
-// still, breathes while listening, sweeps while thinking and moves while speaking.
+// Voiceprints: a ring of bars shaped by a name, so every voice has its own mark. The ones
+// on stage are always a little alive: they turn and shimmer at rest, lean in and move with
+// your voice (or your typing) while listening, sweep while thinking, and move with the bot's
+// voice (or its words arriving) while speaking.
 
-let ticking = false; // whether moving prints are being drawn
+let ticking = false; // whether frames are being drawn
+const sound = { you: 0, voice: 0, youAt: 0, voiceAt: 0 }; // the latest loudness, 0 to 1, and when
+const heard = { you: 0, voice: 0 }; // the same, smoothed: what the prints show
 
 function seeded(text) {
   let h = 2166136261;
@@ -100,7 +104,8 @@ function seeded(text) {
   };
 }
 
-function voiceprint(name, color, size, letter = true) {
+// `alive` prints keep moving at rest; the rest move only while their voice is busy.
+function voiceprint(name, color, size, letter = true, alive = false) {
   const rand = seeded(name || "voice");
   const raw = Array.from({ length: 60 }, () => 0.12 + 0.88 * rand() ** 1.5);
   const bars = raw.map((v, i) => (raw[(i + 59) % 60] + v * 2 + raw[(i + 1) % 60]) / 4); // smooth neighbours into one shape
@@ -109,18 +114,35 @@ function voiceprint(name, color, size, letter = true) {
   canvas.width = canvas.height = Math.round(size * ratio);
   canvas.style.width = canvas.style.height = `${size}px`;
   canvas.setAttribute("aria-hidden", "true");
-  const print = { canvas, name, color, size: size * ratio, bars, letter, state: "idle", seed: rand() * 100 };
+  const print = { canvas, name, color, size: size * ratio, bars, letter, alive, state: "idle", seed: rand() * 100 };
   canvas.print = print;
   draw(print, performance.now() / 1000);
+  if (alive) animate();
   return canvas;
+}
+
+// Loudness from the app's meter, a keystroke, or words arriving.
+function hear(who, level) {
+  sound[who] = level;
+  sound[`${who}At`] = performance.now();
+  animate();
 }
 
 function motion(p, i, n, t) {
   const phase = t + p.seed;
-  if (p.state === "speaking") return 0.5 + 0.5 * Math.abs(Math.sin(phase * 6.5 + i * 0.85) * Math.sin(phase * 2.9 + i * 0.31));
+  if (p.state === "speaking") {
+    const wobble = Math.abs(Math.sin(phase * 6.5 + i * 0.85) * Math.sin(phase * 2.9 + i * 0.31));
+    // With sound to follow, the bars move with it; otherwise they keep a talking rhythm.
+    return heard.voice > 0.02 ? 0.4 + heard.voice * (0.3 + 0.6 * wobble) : 0.5 + 0.5 * wobble;
+  }
   if (p.state === "thinking") return 0.32 + 0.68 * Math.max(0, Math.cos(phase * 3.2 - (i / n) * Math.PI * 2)) ** 4;
-  if (p.state === "listening") return 0.52 + 0.1 * Math.sin(phase * 1.3 + i * 0.18);
-  return 0.5;
+  if (p.state === "listening") {
+    const ripple = 0.5 + 0.5 * Math.sin(phase * 7 + i * 1.3) * Math.sin(phase * 3.1 - i * 0.7);
+    // Breathes while it waits, and leans in when you talk or type.
+    return 0.54 + 0.08 * Math.sin(phase * 1.3 + i * 0.18) + heard.you * 0.55 * ripple;
+  }
+  // At rest, a slow shimmer, so it never looks switched off.
+  return p.alive ? 0.5 + 0.04 * Math.sin(phase * 0.9 + i * 0.45) * Math.sin(phase * 0.37 + i * 0.13) : 0.5;
 }
 
 function draw(p, t) {
@@ -130,12 +152,13 @@ function draw(p, t) {
   const n = p.bars.length;
   const inner = s * (p.letter ? 0.27 : 0.2);
   const reach = s * (p.letter ? 0.25 : 0.3);
+  const spin = p.alive && !still.matches ? t * 0.03 : 0; // about one turn every three and a half minutes
   ctx.clearRect(0, 0, s, s);
   ctx.lineCap = "round";
   ctx.lineWidth = Math.max(1, s * (p.letter ? 0.02 : 0.03));
   ctx.strokeStyle = p.color;
   for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2 + spin;
     const m = motion(p, i, n, t);
     const len = reach * p.bars[i] * m + s * 0.012;
     ctx.globalAlpha = p.state === "idle" ? 0.85 : 0.3 + 0.7 * Math.min(1, m);
@@ -154,27 +177,325 @@ function draw(p, t) {
   }
 }
 
+// Bodies: each bot is an orb of light, a cloud of points shaped by its name. It breathes and
+// turns at rest, draws in and shivers with your voice (or your typing) as it listens, swirls
+// its bands as it thinks, and sends rings of light outward with its voice as it speaks. Big
+// bodies draw on the GPU; small ones, and any Mac without WebGL, draw the same points flat.
+
+const BODY_SCALE = 0.72; // how much of its canvas the orb fills
+const BODY_VERT = `
+precision highp float;
+attribute vec4 aPos;
+attribute vec4 aRand;
+uniform float uTime, uBreath, uListen, uThink, uSpeak, uLevel, uSize, uDpr, uAlpha, uScale;
+uniform vec3 uBase, uAccent;
+varying vec3 vColor;
+varying float vAlpha;
+vec3 rotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }
+vec3 rotX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }
+void main() {
+  vec3 p = aPos.xyz;
+  float loose = step(1.5, aPos.w);
+  float bright = step(0.5, aPos.w) * (1.0 - loose);
+  p *= 0.84 + 0.05 * uBreath - 0.06 * uListen;
+  p = rotY(p, uThink * uTime * (0.5 + (1.0 - abs(p.y)) * 1.8));
+  float shiver = sin(dot(aPos.xyz, vec3(9.0, 7.0, 5.0)) + uTime * 7.0 + aRand.x * 6.283);
+  p *= 1.0 + uListen * (0.015 + uLevel * 0.15) * shiver;
+  p += loose * vec3(sin(uTime * 0.4 + aRand.x * 40.0), cos(uTime * 0.33 + aRand.y * 50.0), sin(uTime * 0.27 + aRand.z * 60.0)) * 0.12;
+  p = rotY(p, uTime * (0.18 + uSpeak * 0.14));
+  p = rotX(p, 0.32);
+  float ring = 0.5 + 0.5 * sin(length(p.xy) * 11.0 - uTime * 11.0);
+  p.xy *= 1.0 + uSpeak * (0.03 + uLevel * 0.24) * ring;
+  float persp = 2.6 / (2.6 - p.z);
+  gl_Position = vec4(p.xy * persp * uScale, 0.0, 1.0);
+  gl_PointSize = uSize * uDpr * persp * (0.6 + aRand.z * 0.8) * (1.0 + bright * 0.6);
+  vColor = mix(uBase, uAccent, bright);
+  float front = 0.45 + 0.55 * smoothstep(-0.9, 0.9, p.z);
+  float twinkle = 0.7 + 0.3 * sin(uTime * (1.0 + aRand.w * 2.0) + aRand.w * 30.0);
+  float lift = 1.0 + uListen * (0.25 + uLevel * 0.4) + uSpeak * (0.2 + uLevel * 0.6) + uThink * 0.15;
+  vAlpha = uAlpha * front * twinkle * lift * (0.55 + 0.45 * aRand.y) * (1.0 - loose * 0.5);
+}`;
+// Premultiplied colour, never brighter than its alpha: on dark the glow comes from additive
+// blending inside the canvas, which every compositor keeps.
+const BODY_FRAG = `
+precision mediump float;
+varying vec3 vColor;
+varying float vAlpha;
+uniform float uGlow;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float d = dot(c, c) * 4.0;
+  float soft = 1.0 - smoothstep(0.0, 1.0, d);
+  float a = mix(1.0 - smoothstep(0.45, 1.0, d), soft * soft, uGlow) * min(vAlpha, 1.0);
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(vColor * a, a);
+}`;
+
+// The points of a body: a sphere whose bumps and ridges come from the name, a few bright
+// points, and a few loose ones drifting round it.
+function bodyPoints(name, count) {
+  const rand = seeded(`${name || "voice"} body`);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const lobes = 2 + Math.floor(rand() * 4), ridges = 2 + rand() * 4, depth = 0.04 + rand() * 0.07, twist = rand() * 6.283;
+  const pos = new Float32Array(count * 4), r4 = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / (count - 1)) * 2, ring = Math.sqrt(1 - y * y), th = golden * i;
+    const loose = rand() < 0.05;
+    const rr = (0.86 + depth * Math.sin(th * lobes + twist) * Math.cos(y * ridges) + (rand() - 0.5) * 0.03) * (loose ? 1.2 + rand() * 0.45 : 1);
+    const o = i * 4;
+    pos[o] = Math.cos(th) * ring * rr;
+    pos[o + 1] = y * rr;
+    pos[o + 2] = Math.sin(th) * ring * rr;
+    pos[o + 3] = loose ? 2 : rand() < 0.16 ? 1 : 0;
+    for (let k = 0; k < 4; k++) r4[o + k] = rand();
+  }
+  return { pos, rand: r4, count, seed: rand() * 100 };
+}
+
+function glPainter(canvas) {
+  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false });
+  if (!gl) return null;
+  const shader = (type, source) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+  };
+  const vs = shader(gl.VERTEX_SHADER, BODY_VERT), fs = shader(gl.FRAGMENT_SHADER, BODY_FRAG);
+  if (!vs || !fs) return null;
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+  gl.useProgram(program);
+  const attribute = (name) => {
+    const buffer = gl.createBuffer();
+    const at = gl.getAttribLocation(program, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.enableVertexAttribArray(at);
+    gl.vertexAttribPointer(at, 4, gl.FLOAT, false, 0, 0);
+    return buffer;
+  };
+  const buffers = { pos: attribute("aPos"), rand: attribute("aRand") };
+  const names = ["uTime", "uBreath", "uListen", "uThink", "uSpeak", "uLevel", "uSize", "uDpr", "uAlpha", "uScale", "uBase", "uAccent", "uGlow"];
+  const u = Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(program, n)]));
+  let count = 0;
+  return {
+    load(data) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
+      gl.bufferData(gl.ARRAY_BUFFER, data.pos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.rand);
+      gl.bufferData(gl.ARRAY_BUFFER, data.rand, gl.STATIC_DRAW);
+      count = data.count;
+    },
+    draw(f) {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      if (f.glow > 0.5) gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ONE, gl.ONE);
+      else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      const one = { uTime: f.t, uBreath: f.breath, uListen: f.listen, uThink: f.think, uSpeak: f.speak, uLevel: f.level, uSize: f.size, uDpr: f.dpr, uAlpha: f.alpha, uScale: BODY_SCALE, uGlow: f.glow };
+      for (const [key, value] of Object.entries(one)) gl.uniform1f(u[key], value);
+      gl.uniform3fv(u.uBase, f.base);
+      gl.uniform3fv(u.uAccent, f.accent);
+      gl.drawArrays(gl.POINTS, 0, count);
+    },
+    dispose() {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    },
+  };
+}
+
+// The same body drawn with the 2D canvas: for small icons, where a GPU context per icon would
+// cost more than it shows, and for any Mac without WebGL.
+function flatPainter(canvas) {
+  const ctx = canvas.getContext("2d");
+  let data = null;
+  return {
+    load(d) {
+      data = d;
+    },
+    draw(f) {
+      const s = canvas.width, half = s / 2, scale = half * BODY_SCALE * (f.zoom ?? 1), dot = Math.max(1, s / 90);
+      const ox = half + (f.at?.[0] ?? 0) * half, oy = half + (f.at?.[1] ?? 0) * half;
+      if (!f.keep) ctx.clearRect(0, 0, s, s);
+      ctx.globalCompositeOperation = f.glow > 0.5 ? "lighter" : "source-over";
+      const yaw = f.t * (0.18 + f.speak * 0.14 + f.think * 0.8), cy = Math.cos(yaw), sy = Math.sin(yaw), cx = Math.cos(0.32), sx = Math.sin(0.32);
+      const grow = 0.84 + 0.05 * f.breath - 0.06 * f.listen;
+      for (const [bright, colour] of [[false, f.base], [true, f.accent]]) {
+        ctx.fillStyle = `rgb(${colour.map((v) => Math.round(v * 255)).join(",")})`;
+        for (let i = 0; i < data.count; i++) {
+          const o = i * 4, w = data.pos[o + 3];
+          if ((w > 0.5 && w < 1.5) !== bright) continue;
+          let k = grow;
+          if (f.listen > 0.01) k *= 1 + f.listen * (0.015 + f.level * 0.15) * Math.sin(data.pos[o] * 9 + data.pos[o + 1] * 7 + data.pos[o + 2] * 5 + f.t * 7 + data.rand[o] * 6.283);
+          const x = data.pos[o] * k, y = data.pos[o + 1] * k, z = data.pos[o + 2] * k;
+          const X = cy * x + sy * z, Z0 = -sy * x + cy * z, Y = cx * y - sx * Z0, Z = sx * y + cx * Z0;
+          const ripple = f.speak > 0.01 ? 1 + f.speak * (0.03 + f.level * 0.24) * (0.5 + 0.5 * Math.sin(Math.hypot(X, Y) * 11 - f.t * 11)) : 1;
+          const persp = 2.6 / (2.6 - Z);
+          ctx.globalAlpha = Math.min(1, f.alpha * (0.45 + (0.55 * (Z + 0.9)) / 1.8) * (0.55 + 0.45 * data.rand[o + 1]) * (w > 1.5 ? 0.5 : 1));
+          ctx.fillRect(ox + X * ripple * persp * scale, oy - Y * ripple * persp * scale, dot, dot);
+        }
+      }
+      ctx.globalAlpha = 1;
+    },
+    dispose() {},
+  };
+}
+
+const lightScheme = matchMedia("(prefers-color-scheme: light)");
+const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255 || 0);
+
+// `alive` bodies keep moving at rest; `gpu` false keeps a big body on the flat painter.
+function body(name, color, size, alive = false, gpu = true) {
+  const canvas = el("canvas", "print body");
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.75);
+  canvas.width = canvas.height = Math.round(size * ratio);
+  canvas.style.width = canvas.style.height = `${size}px`;
+  canvas.setAttribute("aria-hidden", "true");
+  const big = size >= 90;
+  const count = Math.round(size * (big ? 13 : 7));
+  const p = { canvas, name, color, size, alive, body: true, state: "idle", ratio, seed: 0, mix: { listen: 0, think: 0, speak: 0 } };
+  p.painter = (big && gpu && glPainter(canvas)) || flatPainter(canvas);
+  // A new name or colour reshapes the same body, so the New voice preview keeps one canvas.
+  p.retarget = (nextName, nextColor) => {
+    const data = bodyPoints(nextName, count);
+    Object.assign(p, { name: nextName, color: nextColor, seed: data.seed });
+    p.painter.load(data);
+  };
+  p.retarget(name, color);
+  canvas.print = p;
+  paint(p, performance.now() / 1000);
+  if (alive) animate();
+  return canvas;
+}
+
+// A group's icon: up to three of its voices' orbs overlapping, each in its own colour, so a
+// group reads as a group at a glance. Where they overlap, their light mixes.
+function groupBody(group, size) {
+  const canvas = el("canvas", "print body");
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.75);
+  canvas.width = canvas.height = Math.round(size * ratio);
+  canvas.style.width = canvas.style.height = `${size}px`;
+  canvas.setAttribute("aria-hidden", "true");
+  const voices = group.bots.slice(0, 3);
+  const spots = voices.length < 3 ? [[-0.2, 0], [0.2, 0]] : [[0, -0.19], [-0.2, 0.15], [0.2, 0.15]];
+  const parts = voices.map((name, i) => {
+    const painter = flatPainter(canvas);
+    painter.load(bodyPoints(name, Math.round(size * 5)));
+    return { painter, color: hue(name), at: spots[i], zoom: 0.6 };
+  });
+  const p = { canvas, name: group.name, size, alive: false, body: true, state: "idle", ratio, seed: 0, mix: { listen: 0, think: 0, speak: 0 }, parts };
+  canvas.print = p;
+  paint(p, performance.now() / 1000);
+  return canvas;
+}
+
+// Frees the GPU contexts of the bodies inside `container` before they're replaced.
+function retire(container) {
+  container.querySelectorAll("canvas.body").forEach((c) => c.print.painter.dispose());
+}
+
+function paintBody(p, t) {
+  for (const [key, state] of [["listen", "listening"], ["think", "thinking"], ["speak", "speaking"]]) {
+    p.mix[key] += ((p.state === state ? 1 : 0) - p.mix[key]) * 0.1;
+  }
+  if (!p.alive && p.state === "idle") p.mix = { listen: 0, think: 0, speak: 0 }; // a still icon rests fully
+  const talking = heard.voice > 0.02 ? heard.voice : 0.3 + 0.35 * Math.abs(Math.sin(t * 8.3) * Math.sin(t * 3.1));
+  const level = p.state === "listening" ? heard.you : p.state === "speaking" ? talking : 0;
+  const light = lightScheme.matches;
+  // One orb, or a group's several drawn over each other on the same canvas.
+  const parts = p.parts ?? [{ painter: p.painter, color: p.color }];
+  parts.forEach((part, i) => {
+    const rgb = rgbOf(part.color);
+    part.painter.draw({
+      t,
+      breath: 0.5 + 0.5 * Math.sin(t * 1.2 + p.seed + i * 2.1),
+      level,
+      ...p.mix,
+      base: light ? rgb.map((v) => v * 0.62) : rgb,
+      accent: light ? rgb.map((v) => v * 0.38) : rgb.map((v) => v + (1 - v) * 0.72),
+      glow: light ? 0.15 : 1,
+      alpha: light ? 0.9 : 0.85,
+      size: Math.max(1.1, p.size / 95),
+      dpr: p.ratio,
+      at: part.at,
+      zoom: part.zoom,
+      keep: i > 0,
+    });
+  });
+}
+
+function paint(p, t) {
+  if (p.body) paintBody(p, t);
+  else draw(p, t);
+}
+
 function setPrint(canvas, state) {
   const p = canvas?.print;
   if (!p || p.state === state) return;
   p.state = state;
-  draw(p, performance.now() / 1000);
-  if (state !== "idle" && !ticking) {
-    ticking = true;
-    requestAnimationFrame(frame);
-  }
+  paint(p, performance.now() / 1000);
+  if (state !== "idle") animate();
 }
 
-// Draws the moving prints, and stops once none move, so a quiet Voxen uses no power.
+function animate() {
+  if (ticking || still.matches) return;
+  ticking = true;
+  requestAnimationFrame(frame);
+}
+
+let glow = { you: -1, talk: -1 }; // what the cast's glow was last set to
 function frame(ms) {
+  // Loudness that stopped coming fades out; new loudness comes in fast.
+  for (const who of ["you", "voice"]) {
+    const target = ms - sound[`${who}At`] < 250 ? sound[who] : 0;
+    heard[who] += (target - heard[who]) * (target > heard[who] ? 0.5 : 0.08);
+  }
+  // The glow behind a voice follows the same loudness; a talking rhythm stands in when silent.
+  const next = { you: heard.you, talk: heard.voice > 0.02 ? heard.voice : 0.3 + 0.2 * Math.sin(ms / 310) };
+  for (const [key, value] of Object.entries(next)) {
+    if (Math.abs(value - glow[key]) > 0.01) {
+      glow[key] = value;
+      $("cast").style.setProperty(`--${key}`, value.toFixed(3));
+    }
+  }
   let moving = false;
   for (const canvas of document.querySelectorAll("canvas.print")) {
-    if (canvas.print.state === "idle" || still.matches) continue;
-    draw(canvas.print, ms / 1000);
+    const p = canvas.print;
+    if (still.matches || (p.state === "idle" && !p.alive)) continue;
     moving = true;
+    if (p.state === "idle" && ms - (p.drawn ?? 0) < 33) continue; // a calm 30 frames a second at rest
+    p.drawn = ms;
+    paint(p, ms / 1000);
   }
-  ticking = moving;
-  if (moving) requestAnimationFrame(frame);
+  ticking = moving || heard.you > 0.01 || heard.voice > 0.01;
+  if (ticking) requestAnimationFrame(frame);
+}
+
+// While you type, the room's voices listen in, and their bars move with your keys.
+let typingTimer = 0;
+function attend(state) {
+  document.querySelectorAll("#cast .member").forEach((card) => {
+    if (card.dataset.state === "thinking" || card.dataset.state === "speaking") return;
+    card.dataset.state = state;
+    setPrint(card.querySelector("canvas"), state);
+  });
+  setPrint($("you").firstChild, state);
+}
+function typing() {
+  hear("you", 0.35 + Math.random() * 0.35);
+  if (voiceOn) return;
+  attend("listening");
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => !voiceOn && attend("idle"), 1600);
+}
+
+// A room's icon in the sidebar moves while a voice works there.
+function railState(room, state) {
+  setPrint(document.querySelector(`.room-btn[data-room="${CSS.escape(room)}"] canvas`), state);
 }
 
 // Rooms are "main", "bot:<name>" and "group:<name>".
@@ -215,12 +536,12 @@ function roomButton(room, icon, title, sub, count) {
 function renderRail() {
   const items = [];
   const mainBot = bot(team.main);
-  if (mainBot) items.push(roomButton("main", voiceprint(mainBot.name, hue(mainBot.name), 42), mainBot.name, "Your main voice"));
+  if (mainBot) items.push(roomButton("main", body(mainBot.name, hue(mainBot.name), 42), mainBot.name, "Your main voice"));
   for (const b of team.bots.filter((x) => !same(x.name, team.main))) {
-    items.push(roomButton(`bot:${b.name}`, voiceprint(b.name, hue(b.name), 42), b.name, b.role));
+    items.push(roomButton(`bot:${b.name}`, body(b.name, hue(b.name), 42), b.name, b.role));
   }
   for (const g of team.groups) {
-    items.push(roomButton(`group:${g.name}`, voiceprint(g.name, ink(), 42, false), g.name, and(g.bots), g.bots.length));
+    items.push(roomButton(`group:${g.name}`, groupBody(g, 42), g.name, and(g.bots), g.bots.length));
   }
   items.slice(0, 9).forEach((li, i) => {
     li.firstChild.append(el("kbd", "kbd", `⌘${i + 1}`));
@@ -263,14 +584,15 @@ function renderSetup() {
 
 function renderCast() {
   const names = members(open);
-  const size = names.length === 1 ? 150 : names.length === 2 ? 116 : 96;
+  const size = names.length === 1 ? 200 : names.length === 2 ? 160 : 128;
+  retire($("cast"));
   $("cast").replaceChildren(
-    ...names.map((name) => {
+    ...names.map((name, i) => {
       const card = el("div", "member");
       card.dataset.name = name;
       card.style.setProperty("--c", hue(name));
       const ring = el("span", "glow");
-      ring.append(voiceprint(name, hue(name), size));
+      ring.append(body(name, hue(name), size, true, i < 4)); // a few GPU bodies at most
       card.append(ring, el("span", "n", name), el("span", "s"));
       card.title = `Change ${name}: brain, voice and more`;
       card.addEventListener("click", () => bot(name) && openBotDialog(bot(name)));
@@ -532,11 +854,12 @@ function onUpdate(u) {
         addLine(room, hearing);
       }
       stick(scriptFor(room), () => (hearing.lastChild.textContent = `${u.text}…`));
-      setPrint($("you").firstChild, "speaking");
+      setPrint($("you").firstChild, "listening");
       break;
     case "start":
       lives[room] = botLine(u.bot);
       addLine(room, lives[room].line);
+      railState(room, "thinking");
       if (!here) markUnread(room);
       if (here) {
         if (lastSpeaker[room] && !same(lastSpeaker[room], u.bot)) passTurn(lastSpeaker[room], u.bot);
@@ -548,7 +871,11 @@ function onUpdate(u) {
     case "text":
       if (!live) break;
       stick(scriptFor(room), () => speak(live.said, u.text));
-      if (here && !voiceOn) castState(live.bot, "speaking");
+      railState(room, "speaking");
+      if (here && !voiceOn) {
+        castState(live.bot, "speaking");
+        hear("voice", 0.4 + Math.random() * 0.35); // no audio to follow, so the words set the pace
+      }
       break;
     case "first_audio":
       if (!live) break;
@@ -557,6 +884,7 @@ function onUpdate(u) {
       break;
     case "done":
     case "cut":
+      railState(room, "idle");
       if (live) {
         live.line.classList.remove("live");
         live.line.removeAttribute("aria-busy");
@@ -572,6 +900,10 @@ function onUpdate(u) {
         refreshQuiet();
         castState(null, "idle");
       }
+      break;
+    case "levels":
+      hear("you", u.you);
+      hear("voice", u.voice);
       break;
     case "step":
       live?.steps.append(el("li", "step", u.text));
@@ -657,8 +989,18 @@ function runDemo() {
   const cast = members(room).length ? members(room) : [team.main];
   let at = 300;
   const later = (ms, fn) => demo.push(setTimeout(fn, (at += ms)));
-  later(0, () => {
-    onUpdate({ chat: room, kind: "you", text: "Plan a long weekend in Lisbon for two. Mid-range budget.", demo: true });
+  // You ask out loud first: the voices listen, and your words appear as you say them.
+  const ask = "Plan a long weekend in Lisbon for two. Mid-range budget.";
+  const words = ask.split(" ");
+  later(0, () => attend("listening"));
+  words.forEach((_, k) =>
+    later(140, () => {
+      onUpdate({ chat: room, kind: "hearing", text: words.slice(0, k + 1).join(" ") });
+      hear("you", 0.35 + Math.random() * 0.45);
+    }),
+  );
+  later(400, () => {
+    onUpdate({ chat: room, kind: "you", text: ask, demo: true });
     demoed.add(room);
   });
   DEMO_LINES.slice(0, Math.max(1, Math.min(3, cast.length))).forEach((text, i) => {
@@ -801,6 +1143,7 @@ input.addEventListener("keydown", (e) => {
   }
 });
 input.addEventListener("input", grow);
+input.addEventListener("input", typing);
 $("voice").addEventListener("click", () => setVoice(!voiceOn));
 $("demo").addEventListener("click", runDemo);
 $("clear").addEventListener("click", async () => {
@@ -962,10 +1305,12 @@ function renderSwatches() {
 
 function updatePreview() {
   const name = botField("name").value.trim() || "New voice";
-  const print = voiceprint(name, draft.color, 140);
+  const holder = $("preview-print");
+  let print = holder.firstChild?.print?.body ? holder.firstChild : null;
+  if (print) print.print.retarget(name, draft.color);
+  else holder.replaceChildren((print = body(name, draft.color, 160, true)));
   setPrint(print, "speaking");
-  $("preview-print").style.setProperty("--c", draft.color);
-  $("preview-print").replaceChildren(print);
+  holder.style.setProperty("--c", draft.color);
   $("preview-name").textContent = name;
   $("preview-role").textContent = botField("role").value.trim() || "What it's for";
 }
@@ -1033,7 +1378,7 @@ function openGroupDialog() {
       pick.setAttribute("aria-pressed", "false");
       const who = el("span", "who-pick");
       who.append(el("b", "", b.name), el("small", "", b.role));
-      pick.append(voiceprint(b.name, hue(b.name), 32), who);
+      pick.append(body(b.name, hue(b.name), 32), who);
       return pick;
     }),
   );
@@ -1141,8 +1486,8 @@ document.querySelectorAll("dialog").forEach((d) => d.addEventListener("close", (
 
 function paintMarks() {
   const state = voiceOn ? "listening" : "idle";
-  $("mark").replaceChildren(voiceprint("voxen", ink(), 48, false));
-  $("you").replaceChildren(voiceprint("you", ink(), 46, false));
+  $("mark").replaceChildren(voiceprint("voxen", ink(), 48, false, true));
+  $("you").replaceChildren(voiceprint("you", ink(), 46, false, true));
   setPrint($("mark").firstChild, state);
   setPrint($("you").firstChild, state);
 }

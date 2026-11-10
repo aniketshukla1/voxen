@@ -40,6 +40,8 @@ pub enum Command {
         heard: Heard,
         now: f64,
     },
+    /// How loud you are right now, 0 to 1, from the microphone.
+    Level(f32),
     /// Stop whoever is talking.
     Stop,
     /// Say replies out loud (voice on) or only show them.
@@ -73,6 +75,9 @@ pub enum Update {
     You { text: String },
     /// Words you're saying right now, before your turn ends.
     Hearing { text: String },
+    /// How loud you and the speaking bot are, about 16 times a second while either makes a
+    /// sound, so the voiceprints can move with the voices.
+    Levels { you: f32, voice: f32 },
     /// A bot started replying.
     Start { bot: String },
     /// More of the bot's reply.
@@ -150,6 +155,15 @@ pub fn listen(
     let (audio_tx, mut audio_rx) = mpsc::unbounded_channel();
     let mic = audio::mic(audio_tx)?;
     let rate = mic.rate;
+    let (meter, levels) = (mic.level.clone(), commands.clone());
+    tokio::spawn(async move {
+        while !meter.gone() {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            if levels.send(Command::Level(meter.get())).is_err() {
+                break;
+            }
+        }
+    });
     let (heard_tx, mut heard_rx) = mpsc::unbounded_channel();
     let sent = Arc::new(AtomicU64::new(0));
     let (counter, reports) = (sent.clone(), commands.clone());
@@ -274,6 +288,9 @@ struct State {
     queue: Vec<String>,
     last_word_end: f64,
     speak: bool,
+    /// How loud you were at the last reading, and whether the last meter reading was sent.
+    you_level: f32,
+    metering: bool,
     /// Files waiting to go with your next turn.
     attached: Vec<Attachment>,
 }
@@ -284,6 +301,8 @@ async fn run(shared: Arc<Shared>, mut commands: mpsc::UnboundedReceiver<Command>
         ..State::default()
     };
     let mut clock = tokio::time::interval(Duration::from_secs(15));
+    let mut meter = tokio::time::interval(Duration::from_millis(60));
+    meter.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             command = commands.recv() => match command {
@@ -292,6 +311,7 @@ async fn run(shared: Arc<Shared>, mut commands: mpsc::UnboundedReceiver<Command>
             },
             result = finished(&mut state.reply) => state.finish(&shared, result),
             _ = clock.tick() => state.tick(&shared),
+            _ = meter.tick() => state.meter(&shared),
         }
     }
     state.cut(&shared, None);
@@ -353,10 +373,12 @@ impl State {
                 }
             }
             Command::Heard { heard, now } => self.heard(shared, heard, now),
+            Command::Level(level) => self.you_level = level,
             Command::Stop => self.cut(shared, None),
             Command::Speak(on) => {
                 self.speak = on;
                 if !on {
+                    self.you_level = 0.0;
                     self.cut(shared, None);
                 }
             }
@@ -426,6 +448,19 @@ impl State {
         entry.files = files.iter().map(Attachment::block).collect();
         self.queue = after(&members, &first);
         self.start(shared, &chat, first, started, self.speak);
+    }
+
+    /// Sends how loud you and the speaking bot are while either makes a sound, and once more
+    /// when both go quiet.
+    fn meter(&mut self, shared: &Shared) {
+        let voice = shared.speaker.as_ref().map_or(0.0, |s| s.level());
+        let you = self.you_level;
+        let loud = voice > 0.0 || you > 0.0;
+        if loud || self.metering {
+            let round = |v: f32| (v * 100.0).round() / 100.0;
+            shared.send(&self.open, Update::Levels { you: round(you), voice: round(voice) });
+        }
+        self.metering = loud;
     }
 
     /// Starts a task that's due, when nobody is talking.
@@ -990,6 +1025,14 @@ bots = ["Maya", "Sam"]
         assert_eq!(
             serde_json::to_value(update).unwrap(),
             serde_json::json!({"chat": "main", "kind": "cut", "bot": "Sam", "after_ms": 280})
+        );
+        let levels = ChatUpdate {
+            chat: "main".into(),
+            update: Update::Levels { you: 0.5, voice: 0.0 },
+        };
+        assert_eq!(
+            serde_json::to_value(levels).unwrap(),
+            serde_json::json!({"chat": "main", "kind": "levels", "you": 0.5, "voice": 0.0})
         );
     }
 
