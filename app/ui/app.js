@@ -213,20 +213,17 @@ void main() {
   float front = 0.45 + 0.55 * smoothstep(-0.9, 0.9, p.z);
   float twinkle = 0.7 + 0.3 * sin(uTime * (1.0 + aRand.w * 2.0) + aRand.w * 30.0);
   float lift = 1.0 + uListen * (0.25 + uLevel * 0.4) + uSpeak * (0.2 + uLevel * 0.6) + uThink * 0.15;
-  vAlpha = uAlpha * front * twinkle * lift * (0.55 + 0.45 * aRand.y) * (1.0 - loose * 0.5);
+  vAlpha = uAlpha * front * twinkle * lift * (0.75 + 0.25 * aRand.y) * (1.0 - loose * 0.5);
 }`;
-// Premultiplied colour, never brighter than its alpha: on dark the glow comes from additive
-// blending inside the canvas, which every compositor keeps.
+// Solid round dots in premultiplied colour, drawn over each other rather than added up, so
+// every bot keeps its own deep colour instead of washing out to white.
 const BODY_FRAG = `
 precision mediump float;
 varying vec3 vColor;
 varying float vAlpha;
-uniform float uGlow;
 void main() {
   vec2 c = gl_PointCoord - 0.5;
-  float d = dot(c, c) * 4.0;
-  float soft = 1.0 - smoothstep(0.0, 1.0, d);
-  float a = mix(1.0 - smoothstep(0.45, 1.0, d), soft * soft, uGlow) * min(vAlpha, 1.0);
+  float a = (1.0 - smoothstep(0.45, 1.0, dot(c, c) * 4.0)) * min(vAlpha, 1.0);
   if (a < 0.003) discard;
   gl_FragColor = vec4(vColor * a, a);
 }`;
@@ -278,7 +275,7 @@ function glPainter(canvas) {
     return buffer;
   };
   const buffers = { pos: attribute("aPos"), rand: attribute("aRand") };
-  const names = ["uTime", "uBreath", "uListen", "uThink", "uSpeak", "uLevel", "uSize", "uDpr", "uAlpha", "uScale", "uBase", "uAccent", "uGlow"];
+  const names = ["uTime", "uBreath", "uListen", "uThink", "uSpeak", "uLevel", "uSize", "uDpr", "uAlpha", "uScale", "uBase", "uAccent"];
   const u = Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(program, n)]));
   let count = 0;
   return {
@@ -294,9 +291,8 @@ function glPainter(canvas) {
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.enable(gl.BLEND);
-      if (f.glow > 0.5) gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ONE, gl.ONE);
-      else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      const one = { uTime: f.t, uBreath: f.breath, uListen: f.listen, uThink: f.think, uSpeak: f.speak, uLevel: f.level, uSize: f.size, uDpr: f.dpr, uAlpha: f.alpha, uScale: BODY_SCALE, uGlow: f.glow };
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      const one = { uTime: f.t, uBreath: f.breath, uListen: f.listen, uThink: f.think, uSpeak: f.speak, uLevel: f.level, uSize: f.size, uDpr: f.dpr, uAlpha: f.alpha, uScale: BODY_SCALE };
       for (const [key, value] of Object.entries(one)) gl.uniform1f(u[key], value);
       gl.uniform3fv(u.uBase, f.base);
       gl.uniform3fv(u.uAccent, f.accent);
@@ -318,10 +314,9 @@ function flatPainter(canvas) {
       data = d;
     },
     draw(f) {
-      const s = canvas.width, half = s / 2, scale = half * BODY_SCALE * (f.zoom ?? 1), dot = Math.max(1, s / 90);
+      const s = canvas.width, half = s / 2, scale = half * BODY_SCALE * (f.zoom ?? 1), dot = Math.max(1.5, s / 80);
       const ox = half + (f.at?.[0] ?? 0) * half, oy = half + (f.at?.[1] ?? 0) * half;
       if (!f.keep) ctx.clearRect(0, 0, s, s);
-      ctx.globalCompositeOperation = f.glow > 0.5 ? "lighter" : "source-over";
       const yaw = f.t * (0.18 + f.speak * 0.14 + f.think * 0.8), cy = Math.cos(yaw), sy = Math.sin(yaw), cx = Math.cos(0.32), sx = Math.sin(0.32);
       const grow = 0.84 + 0.05 * f.breath - 0.06 * f.listen;
       for (const [bright, colour] of [[false, f.base], [true, f.accent]]) {
@@ -335,7 +330,7 @@ function flatPainter(canvas) {
           const X = cy * x + sy * z, Z0 = -sy * x + cy * z, Y = cx * y - sx * Z0, Z = sx * y + cx * Z0;
           const ripple = f.speak > 0.01 ? 1 + f.speak * (0.03 + f.level * 0.24) * (0.5 + 0.5 * Math.sin(Math.hypot(X, Y) * 11 - f.t * 11)) : 1;
           const persp = 2.6 / (2.6 - Z);
-          ctx.globalAlpha = Math.min(1, f.alpha * (0.45 + (0.55 * (Z + 0.9)) / 1.8) * (0.55 + 0.45 * data.rand[o + 1]) * (w > 1.5 ? 0.5 : 1));
+          ctx.globalAlpha = Math.min(1, f.alpha * (0.45 + (0.55 * (Z + 0.9)) / 1.8) * (0.75 + 0.25 * data.rand[o + 1]) * (w > 1.5 ? 0.5 : 1));
           ctx.fillRect(ox + X * ripple * persp * scale, oy - Y * ripple * persp * scale, dot, dot);
         }
       }
@@ -373,7 +368,7 @@ function body(name, color, size, alive = false, gpu = true) {
 }
 
 // A group's icon: up to three of its voices' orbs overlapping, each in its own colour, so a
-// group reads as a group at a glance. Where they overlap, their light mixes.
+// group reads as a group at a glance. Where they overlap, their dots mix.
 function groupBody(group, size) {
   const canvas = el("canvas", "print body");
   const ratio = Math.min(window.devicePixelRatio || 1, 1.75);
@@ -415,11 +410,10 @@ function paintBody(p, t) {
       breath: 0.5 + 0.5 * Math.sin(t * 1.2 + p.seed + i * 2.1),
       level,
       ...p.mix,
-      base: light ? rgb.map((v) => v * 0.62) : rgb,
-      accent: light ? rgb.map((v) => v * 0.38) : rgb.map((v) => v + (1 - v) * 0.72),
-      glow: light ? 0.15 : 1,
-      alpha: light ? 0.9 : 0.85,
-      size: Math.max(1.1, p.size / 95),
+      base: rgb.map((v) => v * (light ? 0.52 : 0.85)),
+      accent: light ? rgb.map((v) => v * 0.32) : rgb.map((v) => v + (1 - v) * 0.25),
+      alpha: 1,
+      size: Math.max(1.3, p.size / 85),
       dpr: p.ratio,
       at: part.at,
       zoom: part.zoom,
