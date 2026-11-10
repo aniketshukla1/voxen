@@ -25,9 +25,10 @@
         <span class="lbl"><b>New room</b><small>Bots talk it over</small></span>
         <kbd class="kbd">⇧⌘N</kbd>
       </button>
-      <button id="setup" class="rail-btn" type="button">
-        <span class="ico"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M17 6l3 3"/></svg><i class="dot"></i></span>
-        <span class="lbl"><b id="setup-title">Finish setup</b><small id="setup-sub">Add your keys</small></span>
+      <button id="settings-btn" class="rail-btn" type="button" aria-keyshortcuts="Meta+Comma">
+        <span class="ico"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><i class="dot"></i></span>
+        <span class="lbl"><b>Settings</b><small id="settings-sub">Add your keys</small></span>
+        <kbd class="kbd">⌘,</kbd>
       </button>
     </div>
   </nav>
@@ -54,6 +55,7 @@
       <div id="suggestions" class="suggestions"></div>
       <button id="demo" class="demo-link" type="button">or watch a demo</button>
       <p id="note" class="note" role="status"></p>
+      <button id="setup-cta" class="solid" type="button" hidden>Add your AI key</button>
     </section>
 
     <footer class="dock">
@@ -137,22 +139,38 @@
     </form>
   </dialog>
 
-  <dialog id="setup-dialog" aria-labelledby="setup-heading">
-    <form id="setup-form" class="sheet" novalidate>
-      <span id="setup-print" class="setup-print" aria-hidden="true"></span>
-      <h2 id="setup-heading">Set up Voxen</h2>
-      <p class="sheet-sub">Voxen runs on your own keys. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
-      <p class="label">Voice</p>
-      <div id="voice-keys" class="keys"></div>
-      <p class="label">Brains: add any you like. Each bot can think with a different one.</p>
-      <div id="brain-keys" class="keys"></div>
-      <p id="setup-error" class="form-error" role="alert"></p>
-      <div class="sheet-actions">
-        <button class="ghost big" type="button" data-close>Later</button>
-        <button id="setup-save" class="solid" type="submit">Save and restart</button>
+  <section id="settings" class="settings" hidden aria-labelledby="settings-title">
+    <header class="stage-top" data-tauri-drag-region>
+      <div class="room" data-tauri-drag-region>
+        <span id="settings-title" class="room-title">Settings</span>
+        <span id="settings-note" class="room-sub" role="status"></span>
       </div>
-    </form>
-  </dialog>
+      <div class="top-actions"><button id="settings-done" class="ghost" type="button">Done</button></div>
+    </header>
+    <div class="settings-body">
+      <nav id="set-nav" class="set-nav" aria-label="Settings sections">
+        <button type="button" data-pane="keys">Keys</button>
+      </nav>
+      <div class="set-panes">
+        <section class="pane" data-pane="keys" aria-labelledby="pane-keys">
+          <h2 id="pane-keys">Keys</h2>
+          <p class="pane-sub">Voxen runs on your own keys. They stay on this Mac, in the project's <code>.env</code> file, readable only by you.</p>
+          <form id="keys-form" class="pane-form" novalidate>
+            <h3 class="group-title">Voice</h3>
+            <div id="voice-keys" class="keys"></div>
+            <h3 class="group-title">AI providers</h3>
+            <p class="hint">Add any you like. Each bot can think with a different one.</p>
+            <div id="brain-keys" class="keys"></div>
+            <p id="keys-error" class="form-error" role="alert"></p>
+            <div class="pane-actions">
+              <span class="hint">Voxen restarts to use new keys.</span>
+              <button id="keys-save" class="solid" type="submit">Save and restart</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </section>
 
   <script src="app.js"></script>
 </body>

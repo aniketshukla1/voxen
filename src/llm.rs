@@ -142,13 +142,13 @@ impl Brains {
             None => {
                 let base = base_of(provider);
                 if base.is_empty() {
-                    bail!("add the address of your {} in Setup", provider.name);
+                    bail!("add the address of your {} in Settings", provider.name);
                 }
                 let key = match provider.key {
                     Some(name) => match setting(name) {
                         Some(key) => key,
                         None if provider.id == "custom" => String::new(),
-                        None => bail!("add your {} key in Setup", provider.name),
+                        None => bail!("add your {} key in Settings", provider.name),
                     },
                     None => String::new(),
                 };

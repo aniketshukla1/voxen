@@ -513,7 +513,7 @@ function kind(room) {
 // The rail
 
 function roomButton(room, icon, title, sub, count) {
-  const b = button("room-btn", "", () => openRoom(room));
+  const b = button("room-btn", "", () => goRoom(room));
   b.dataset.room = room;
   const ico = el("span", "ico");
   ico.append(icon);
@@ -569,9 +569,8 @@ const brainLabel = (b) => {
 function renderSetup() {
   const chat = Boolean(brainOf(bot(team.main))?.ready);
   const missing = [chat, keys.DEEPGRAM_API_KEY, keys.ELEVENLABS_API_KEY].filter((ok) => !ok).length;
-  $("setup").classList.toggle("ok", missing === 0);
-  $("setup-title").textContent = missing === 0 ? "All set" : chat ? "Add voice" : "Finish setup";
-  $("setup-sub").textContent = missing === 0 ? "Chat and voice are on" : chat ? `${missing} key${missing > 1 ? "s" : ""} to go` : "Add your keys";
+  $("settings-btn").classList.toggle("ok", missing === 0);
+  $("settings-sub").textContent = missing === 0 ? "Keys, bots and the look" : chat ? `Add ${missing} voice key${missing > 1 ? "s" : ""}` : "Add your keys";
 }
 
 // The cast
@@ -825,6 +824,7 @@ function onUpdate(u) {
       renderRail();
       renderHeader();
       renderSetup();
+      refreshSettings();
       if (pendingOpen && exists(pendingOpen)) {
         const next = pendingOpen;
         pendingOpen = null;
@@ -918,6 +918,7 @@ function onUpdate(u) {
       break;
     case "problem":
       note(room, u.text);
+      if (inSettings()) $("settings-note").textContent = u.text;
       break;
   }
 }
@@ -926,7 +927,7 @@ function onUpdate(u) {
 
 async function setVoice(on) {
   if (on && !voiceReady) {
-    openSetup();
+    openSettings("keys");
     return;
   }
   stopDemo();
@@ -1148,23 +1149,26 @@ $("clear").addEventListener("click", async () => {
   input.focus();
 });
 
-// Keys: Esc stops whoever is talking, ⌘1–9 open rooms, ⌘D turns voice on or off, ⌘N makes
-// a voice and ⇧⌘N a room. Typing anywhere else goes to the composer.
+// Keys: Esc stops whoever is talking (and leaves Settings), ⌘1–9 open rooms, ⌘D turns voice
+// on or off, ⌘N makes a voice, ⇧⌘N a room and ⌘, opens Settings. Typing anywhere else in a
+// room goes to the composer.
 document.addEventListener("keydown", (e) => {
   if (document.querySelector("dialog[open]") || e.isComposing) return;
   if (e.key === "Escape") {
     stopDemo();
     call.invoke("stop").catch(() => {});
+    closeSettings();
     return;
   }
   if (!e.metaKey) {
-    if (!e.ctrlKey && !e.altKey && e.key.length === 1 && !e.target.closest("button, input, textarea, select, a")) input.focus();
+    if (!inSettings() && !e.ctrlKey && !e.altKey && e.key.length === 1 && !e.target.closest("button, input, textarea, select, a")) input.focus();
     return;
   }
   if (e.ctrlKey || e.altKey) return;
   const key = e.key.toLowerCase();
   const room = /^[1-9]$/.test(key) && document.querySelectorAll(".room-btn")[Number(key) - 1];
-  if (room) openRoom(room.dataset.room);
+  if (room) goRoom(room.dataset.room);
+  else if (key === ",") openSettings();
   else if (key === "d" && !e.shiftKey) setVoice(!voiceOn);
   else if (key === "n") (e.shiftKey ? openGroupDialog : openBotDialog)();
   else return;
@@ -1225,7 +1229,7 @@ async function loadModels(model) {
   const fill = (names) => $("model-options").replaceChildren(...names.map((n) => Object.assign(el("option"), { value: n })));
   fill(p?.model ? [p.model] : []);
   const can = p ? [p.web ? "Searches the web" : "No web search", p.tools ? "uses memory and reminders" : "no memory or reminders"].join(", ") : "";
-  $("brain-note").textContent = !p ? "" : p.ready ? `${can}.` : `Add your ${p.name} key in Setup to use it. ${can}.`;
+  $("brain-note").textContent = !p ? "" : p.ready ? `${can}.` : `Add your ${p.name} key in Settings to use it. ${can}.`;
   if (!p?.ready) return;
   const asked = ++modelsAsked;
   try {
@@ -1399,14 +1403,62 @@ $("group-form").addEventListener("submit", async (e) => {
   $("group-dialog").close();
 });
 
-// Setup
+// Settings: a page of its own beside the rail. Each section draws itself from the latest team,
+// keys and memory when it's shown, and again when they change.
+
+const settings = $("settings");
+const panes = { keys: renderKeys };
+let pane = "keys";
+const inSettings = () => !settings.hidden;
+
+function openSettings(to = pane) {
+  pane = panes[to] ? to : "keys";
+  stage.hidden = true;
+  settings.hidden = false;
+  $("settings-btn").setAttribute("aria-current", "page");
+  document.querySelectorAll(".room-btn").forEach((r) => r.removeAttribute("aria-current"));
+  document.querySelectorAll("#set-nav button").forEach((b) => {
+    if (b.dataset.pane === pane) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  document.querySelectorAll(".pane").forEach((p) => (p.hidden = p.dataset.pane !== pane));
+  $("settings-note").textContent = "";
+  panes[pane]();
+}
+
+function closeSettings() {
+  if (!inSettings()) return;
+  settings.hidden = true;
+  stage.hidden = false;
+  $("settings-btn").removeAttribute("aria-current");
+  markOpen();
+}
+
+function refreshSettings() {
+  if (inSettings()) panes[pane]();
+}
+
+// Leaving Settings for a room, from the rail or ⌘1–9.
+function goRoom(room) {
+  closeSettings();
+  return openRoom(room);
+}
+
+$("set-nav").addEventListener("click", (e) => {
+  const to = e.target.closest("button")?.dataset.pane;
+  if (to) openSettings(to);
+});
+$("settings-done").addEventListener("click", closeSettings);
+$("setup-cta").addEventListener("click", () => openSettings("keys"));
+
+// Keys
 
 const VOICE_KEYS = [
   { key: "DEEPGRAM_API_KEY", name: "Deepgram", help: "Listens when you talk. Needed for voice. Get a key at console.deepgram.com." },
   { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", help: "Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers." },
 ];
 
-// One service in Setup: its name, whether it's connected, what it's for, and where its key goes.
+// One service in Keys: its name, whether it's connected, what it's for, and where its key goes.
 function keyRow(name, state, help, fields) {
   const row = el("div", "key");
   const head = el("div", "key-head");
@@ -1420,10 +1472,11 @@ function keyRow(name, state, help, fields) {
   return row;
 }
 
-function openSetup() {
-  $("setup-form").reset();
-  $("setup-error").textContent = "";
-  $("setup-save").textContent = "Save and restart";
+function renderKeys() {
+  // Keys you've pasted but not saved stay put while the rows' states redraw around them.
+  if ([...new FormData($("keys-form")).values()].some((v) => String(v).trim())) return;
+  $("keys-error").textContent = "";
+  $("keys-save").textContent = "Save and restart";
   $("voice-keys").replaceChildren(
     ...VOICE_KEYS.map((k) => keyRow(k.name, keys[k.key] ? "connected" : "missing", k.help, [[k.key, `Paste your ${k.name} key`]])),
   );
@@ -1443,32 +1496,28 @@ function openSetup() {
       return keyRow(p.name, state, help, [[p.key, `Paste your ${p.name} key`]]);
     }),
   );
-  const print = voiceprint("voxen", ink(), 52, false);
-  setPrint(print, "listening");
-  $("setup-print").replaceChildren(print);
-  $("setup-dialog").showModal();
 }
 
-$("setup-form").addEventListener("input", () => ($("setup-error").textContent = ""));
-$("setup-form").addEventListener("submit", async (e) => {
+$("keys-form").addEventListener("input", () => ($("keys-error").textContent = ""));
+$("keys-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const entered = Object.fromEntries(
     [...new FormData(e.target).entries()].map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v),
   );
   if (!Object.keys(entered).length) {
-    $("setup-error").textContent = "Paste at least one key.";
+    $("keys-error").textContent = "Paste at least one key.";
     return;
   }
-  $("setup-save").textContent = "Saving…";
+  $("keys-save").textContent = "Saving…";
   try {
     await call.invoke("save_keys", { keys: entered }); // Voxen restarts with the new keys
   } catch (err) {
-    $("setup-error").textContent = String(err);
-    $("setup-save").textContent = "Save and restart";
+    $("keys-error").textContent = String(err);
+    $("keys-save").textContent = "Save and restart";
   }
 });
 
-$("setup").addEventListener("click", openSetup);
+$("settings-btn").addEventListener("click", () => openSettings());
 $("new-bot").addEventListener("click", () => openBotDialog());
 $("edit").addEventListener("click", () => openBotDialog(bot(members(open)[0])));
 $("new-group").addEventListener("click", openGroupDialog);
@@ -1509,7 +1558,8 @@ async function start() {
   call.listen("call", (event) => onUpdate(event.payload));
   await openRoom(team.groups.length && !status.chat ? `group:${team.groups[0].name}` : "main");
   $("note").textContent = status.problem || "";
-  if (tauri && !status.chat) openSetup(); // first run: straight to setup
+  // No pop-up on first run: the empty room says what's missing and offers the way to add it.
+  $("setup-cta").hidden = !(tauri && !status.chat);
 }
 
 start();

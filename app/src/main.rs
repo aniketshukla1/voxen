@@ -18,7 +18,7 @@ use voice_bots::xai::Xai;
 const DEEPGRAM: &str = "DEEPGRAM_API_KEY";
 const ELEVENLABS: &str = "ELEVENLABS_API_KEY";
 
-/// Every setting Setup can save: the two voice keys, each provider's key, and the address of
+/// Every key Settings can save: the two voice keys, each provider's key, and the address of
 /// an OpenAI-compatible server of your own.
 fn key_names() -> Vec<&'static str> {
     let mut names = vec![DEEPGRAM, ELEVENLABS];
@@ -159,7 +159,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
     status.chat = brains.ready(&thinker);
     if !status.chat {
         let name = llm::find(&thinker).map_or("your provider", |p| p.name);
-        status.problem = Some(format!("Add your {name} key in Setup to start chatting."));
+        status.problem = Some(format!("Add your {name} key in Settings to start chatting."));
     }
     let names = team.names();
     let voices = Voices::from_env().ok();
@@ -254,7 +254,7 @@ async fn voices(state: State<'_, CallState>) -> Result<Vec<VoiceOption>, String>
     let voices = state
         .voices
         .as_ref()
-        .ok_or("Add your ElevenLabs key in Setup to choose from your voices.")?;
+        .ok_or("Add your ElevenLabs key in Settings to choose from your voices.")?;
     let list = voices.list().await.map_err(|e| format!("{e:#}"))?;
     Ok(list
         .into_iter()
@@ -266,7 +266,7 @@ async fn voices(state: State<'_, CallState>) -> Result<Vec<VoiceOption>, String>
 #[tauri::command]
 async fn voice(on: bool, state: State<'_, CallState>) -> Result<(), String> {
     if on && !state.status.voice {
-        return Err("Voice needs your Deepgram and ElevenLabs keys. Add them in Setup.".into());
+        return Err("Voice needs your Deepgram and ElevenLabs keys. Add them in Settings.".into());
     }
     let mic = if on {
         let key = std::env::var(DEEPGRAM).map_err(|e| e.to_string())?;

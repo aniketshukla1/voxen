@@ -742,7 +742,7 @@ async fn use_tool(
         shared
             .xai
             .as_ref()
-            .context("X search and pictures need an xAI key; the user can add one in Setup.")
+            .context("X search and pictures need an xAI key; the user can add one in Settings.")
     };
     match name {
         "search_x" => {
@@ -1080,7 +1080,7 @@ bots = ["Maya", "Sam"]
     async fn live_turn(said: &str) -> Vec<Update> {
         dotenvy::dotenv().ok();
         let brains = Brains::new();
-        assert!(brains.ready("anthropic"), "put ANTHROPIC_API_KEY in .env (Setup in the app does it)");
+        assert!(brains.ready("anthropic"), "put ANTHROPIC_API_KEY in .env (Settings in the app does it)");
         let (commands, mut updates) = start(Team::parse(TEAM).unwrap(), brains, None, None, None);
         commands.send(Command::Typed(said.into())).unwrap();
         let mut got = Vec::new();

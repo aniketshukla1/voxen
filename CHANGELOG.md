@@ -2,6 +2,17 @@
 
 What changed in each Voxen release, newest first.
 
+## [Unreleased]
+
+### Added
+
+- A Settings page (⌘, or the button at the bottom of the sidebar), with your keys in it.
+
+### Changed
+
+- No setup dialog on first run. The empty room says what's missing, and its button opens
+  Settings at Keys.
+
 ## [0.1.0] - 2026-11-10
 
 The first public release.
