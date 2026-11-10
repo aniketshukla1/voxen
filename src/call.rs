@@ -62,6 +62,10 @@ pub enum Command {
     /// Change who is in a group, found by name.
     UpdateGroup(Group),
     RemoveGroup(String),
+    /// Something every bot should know about you, added in Settings.
+    Remember(String),
+    /// Forget one fact exactly as saved, or everything (None).
+    Forget(Option<String>),
     /// Something outside the conversations went wrong, to pass on as an update.
     Problem(String),
 }
@@ -113,6 +117,8 @@ pub enum Update {
         bots: Vec<Bot>,
         groups: Vec<Group>,
     },
+    /// Everything the bots remember about you, after a change.
+    Memory { facts: Vec<String> },
     /// Something went wrong; the conversation carries on.
     Problem { text: String },
 }
@@ -261,6 +267,19 @@ impl Shared {
             }
         }
     }
+
+    /// Applies a change to what the bots remember and, when it worked, tells the front-end.
+    /// Every change goes through here, so Settings always shows the latest facts.
+    fn change_memory<T>(&self, change: impl FnOnce(&mut Memory) -> Result<T>) -> Result<T> {
+        let mut memory = lock(&self.memory);
+        let result = change(&mut memory);
+        let facts = memory.facts.clone();
+        drop(memory);
+        if result.is_ok() {
+            self.send("", Update::Memory { facts });
+        }
+        result
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -408,6 +427,16 @@ impl State {
             }
             Command::RemoveGroup(name) => {
                 shared.change_team(&self.open, |team| team.remove_group(&name))
+            }
+            Command::Remember(fact) => {
+                if let Err(e) = shared.change_memory(|memory| memory.remember(&fact)) {
+                    shared.send(&self.open, Update::Problem { text: format!("{e:#}") });
+                }
+            }
+            Command::Forget(fact) => {
+                if let Err(e) = shared.change_memory(|memory| memory.remove(fact.as_deref())) {
+                    shared.send(&self.open, Update::Problem { text: format!("{e:#}") });
+                }
             }
             Command::Problem(text) => shared.send(&self.open, Update::Problem { text }),
         }
@@ -789,8 +818,8 @@ async fn use_tool(
 fn local_tool(shared: &Shared, job: &Job, name: &str, input: &Value) -> Result<String> {
     let text = |key: &str| input[key].as_str().unwrap_or_default().to_string();
     match name {
-        "remember" => lock(&shared.memory).remember(&text("fact")),
-        "forget" => lock(&shared.memory).forget(&text("words")),
+        "remember" => shared.change_memory(|memory| memory.remember(&text("fact"))),
+        "forget" => shared.change_memory(|memory| memory.forget(&text("words"))),
         "schedule" => {
             let task = Task::new(&job.chat, &job.bot.name, input, Local::now())?;
             lock(&shared.tasks).add(task)
@@ -1055,7 +1084,7 @@ bots = ["Maya", "Sam"]
 
     #[tokio::test]
     async fn local_tools_remember_and_schedule() {
-        let (updates, _rx) = mpsc::unbounded_channel();
+        let (updates, mut rx) = mpsc::unbounded_channel();
         let shared = Shared {
             team: RwLock::new(Team::parse(TEAM).unwrap()),
             brains: Brains::offline(),
@@ -1085,6 +1114,11 @@ bots = ["Maya", "Sam"]
         };
         run("remember", json!({"fact": "Likes tea"})).await.unwrap();
         assert_eq!(lock(&shared.memory).facts, ["Likes tea"]);
+        let told: Vec<Update> = std::iter::from_fn(|| rx.try_recv().ok()).map(|u| u.update).collect();
+        assert!(told.contains(&Update::Memory { facts: vec!["Likes tea".into()] }), "Settings hears about it: {told:?}");
+        shared.change_memory(|memory| memory.remove(Some("Likes tea"))).unwrap();
+        assert!(lock(&shared.memory).facts.is_empty());
+        run("remember", json!({"fact": "Likes tea"})).await.unwrap();
         let soon = (Local::now() + chrono::Duration::hours(1)).format("%Y-%m-%d %H:%M");
         let set = run("schedule", json!({"task": "Stretch", "at": soon.to_string(), "repeat": "never"}))
             .await

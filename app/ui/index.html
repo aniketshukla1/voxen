@@ -155,6 +155,10 @@
         <button type="button" data-pane="rooms">Rooms</button>
         <button type="button" data-pane="voice">Voice</button>
         <button type="button" data-pane="look">Look</button>
+        <button type="button" data-pane="memory">Memory</button>
+        <button type="button" data-pane="data">Privacy &amp; data</button>
+        <button type="button" data-pane="shortcuts">Shortcuts</button>
+        <button type="button" data-pane="about">About</button>
       </nav>
       <div class="set-panes">
         <section class="pane" data-pane="keys" aria-labelledby="pane-keys">
@@ -232,6 +236,58 @@
               <p class="hint">Reduced keeps the Orbs still and turns animations off. It's always reduced while Reduce Motion is on in macOS.</p>
             </fieldset>
           </form>
+        </section>
+        <section class="pane" data-pane="memory" aria-labelledby="pane-memory" hidden>
+          <h2 id="pane-memory">Memory</h2>
+          <p class="pane-sub">What every bot knows about you. Bots add to it when you say "remember…", and you can add or forget things here. It's saved in <code>data/memory.md</code>.</p>
+          <form id="memory-form" class="add-row">
+            <input id="memory-input" name="fact" maxlength="200" placeholder="Something every bot should know, like: I'm vegetarian" autocomplete="off" aria-label="Something every bot should know">
+            <button class="solid" type="submit">Remember</button>
+          </form>
+          <ul id="memory-list" class="set-list"></ul>
+          <div id="memory-forget-all"></div>
+        </section>
+        <section class="pane" data-pane="data" aria-labelledby="pane-data" hidden>
+          <h2 id="pane-data">Privacy &amp; data</h2>
+          <p class="pane-sub">Everything Voxen keeps stays on this Mac, in plain files you can read and edit.</p>
+          <ul class="set-list">
+            <li class="set-row"><div class="set-text"><b>Your keys</b><small><code>.env</code> in the project folder, readable only by you</small></div></li>
+            <li class="set-row"><div class="set-text"><b>Your bots and rooms</b><small><code>team.toml</code> in the project folder</small></div></li>
+            <li class="set-row"><div class="set-text"><b>Memory</b><small><code>data/memory.md</code></small></div></li>
+            <li class="set-row"><div class="set-text"><b>Tasks</b><small><code>data/tasks.json</code></small></div></li>
+            <li class="set-row"><div class="set-text"><b>Pictures the bots make</b><small><code>data/pictures/</code></small></div></li>
+          </ul>
+          <div><button id="open-data" class="ghost big" type="button">Show in Finder</button></div>
+          <h3 class="group-title">What leaves this Mac</h3>
+          <ul class="tips">
+            <li>What you say goes only to the services you set up: Deepgram hears it, the bot's AI provider answers it, and ElevenLabs speaks the answer.</li>
+            <li>Web search runs through the bot's AI provider; X search and pictures through xAI.</li>
+            <li>Chats aren't saved: they're gone when Voxen quits. Memory and tasks stay until you forget or cancel them.</li>
+          </ul>
+        </section>
+        <section class="pane" data-pane="shortcuts" aria-labelledby="pane-shortcuts" hidden>
+          <h2 id="pane-shortcuts">Shortcuts</h2>
+          <ul class="set-list">
+            <li class="set-row"><div class="set-text"><b>Voice on or off</b></div><kbd class="cap">⌘D</kbd></li>
+            <li class="set-row"><div class="set-text"><b>Stop whoever is talking</b></div><kbd class="cap">Esc</kbd></li>
+            <li class="set-row"><div class="set-text"><b>Open a room in the sidebar</b></div><kbd class="cap">⌘1</kbd><span class="hint">to</span><kbd class="cap">⌘9</kbd></li>
+            <li class="set-row"><div class="set-text"><b>New voice</b></div><kbd class="cap">⌘N</kbd></li>
+            <li class="set-row"><div class="set-text"><b>New room</b></div><kbd class="cap">⇧⌘N</kbd></li>
+            <li class="set-row"><div class="set-text"><b>Settings</b><small>Esc goes back to your rooms.</small></div><kbd class="cap">⌘,</kbd></li>
+            <li class="set-row"><div class="set-text"><b>Type to the room</b><small>Just start typing anywhere in a room.</small></div></li>
+          </ul>
+        </section>
+        <section class="pane" data-pane="about" aria-labelledby="pane-about" hidden>
+          <h2 id="pane-about">About</h2>
+          <div class="about">
+            <span id="about-mark" class="mark" aria-hidden="true"></span>
+            <div class="set-text"><b>Voxen <span id="about-version"></span></b><small>Your team of voices. Open source under the MIT license.</small></div>
+          </div>
+          <div class="link-row">
+            <button class="ghost big" type="button" data-url="https://github.com/aniketshukla1/voxen">Source on GitHub</button>
+            <button class="ghost big" type="button" data-url="https://github.com/aniketshukla1/voxen/blob/main/CHANGELOG.md">What's new</button>
+            <button class="ghost big" type="button" data-url="https://github.com/aniketshukla1/voxen/issues/new">Report a problem</button>
+          </div>
         </section>
       </div>
     </div>

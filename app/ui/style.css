@@ -456,6 +456,15 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .set-status .pill { margin-left: 0; }
 .set-status .ghost { margin-left: auto; }
 .tips { margin: -4px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; line-height: 1.75; }
+.set-text .fact { font-size: 13px; overflow-wrap: anywhere; }
+.add-row { display: flex; gap: 8px; }
+.add-row input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); font-size: 13px; }
+.add-row input:focus { outline: none; border-color: var(--text-3); }
+.add-row .solid { height: 34px; }
+kbd.cap { padding: 2px 7px; border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px); color: var(--text-2); font: 500 11.5px/1.5 var(--sans); }
+.set-row .hint { margin: 0; }
+.about { display: flex; align-items: center; gap: 14px; }
+.link-row { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 720px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .set-nav { flex-direction: row; overflow-x: auto; padding: 4px 16px 10px; }

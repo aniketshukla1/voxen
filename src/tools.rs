@@ -256,6 +256,16 @@ impl Memory {
         Ok("Saved. Every bot knows it from now on.".into())
     }
 
+    /// Forgets one fact exactly as saved, or everything (None): for Settings, where you pick
+    /// the fact rather than describe it.
+    pub fn remove(&mut self, fact: Option<&str>) -> Result<()> {
+        match fact {
+            Some(fact) => self.facts.retain(|f| f != fact),
+            None => self.facts.clear(),
+        }
+        self.save()
+    }
+
     pub fn forget(&mut self, words: &str) -> Result<String> {
         let words = words.trim().to_lowercase();
         ensure!(!words.is_empty(), "say what to forget");

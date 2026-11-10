@@ -12,6 +12,9 @@ What changed in each Voxen release, newest first.
 - Settings › Voice: start with voice on, and see what voice still needs.
 - Settings › Look: dark, light or matching the Mac, a bigger or smaller window, and reduced
   motion.
+- Settings › Memory: see what every bot knows about you, add to it, or forget things.
+- Settings › Privacy & data, Shortcuts and About: where everything is kept (with Show in
+  Finder), what leaves your Mac, every shortcut, and the version with its links.
 
 ### Changed
 

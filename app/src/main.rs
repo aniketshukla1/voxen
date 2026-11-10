@@ -11,7 +11,7 @@ use voice_bots::audio::{self, Mic};
 use voice_bots::call::{self, Command};
 use voice_bots::llm::{self, Brains, Provider};
 use voice_bots::team::{Bot, Group, Team};
-use voice_bots::tools::Attachment;
+use voice_bots::tools::{Attachment, Memory};
 use voice_bots::tts::Voices;
 use voice_bots::xai::Xai;
 
@@ -43,6 +43,10 @@ struct Status {
     main: String,
     bots: Vec<Bot>,
     groups: Vec<Group>,
+    /// What the bots remember about you, for Settings.
+    memory: Vec<String>,
+    /// This build of Voxen.
+    version: &'static str,
 }
 
 /// A provider, and whether it can be used now.
@@ -106,7 +110,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             status, open, send, attach, stop, clear, voice, add_bot, update_bot, set_main,
             remove_bot, add_group, update_group, remove_group, voices, models, save_keys, open_link,
-            zoom
+            zoom, remember, forget, open_data
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -142,6 +146,8 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
                     main: String::new(),
                     bots: Vec::new(),
                     groups: Vec::new(),
+                    memory: Vec::new(),
+                    version: env!("CARGO_PKG_VERSION"),
                 },
             );
         }
@@ -155,6 +161,8 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         main: team.main.clone(),
         bots: team.bots.clone(),
         groups: team.groups.clone(),
+        memory: Memory::load(Some(root.join("data").join("memory.md"))).facts,
+        version: env!("CARGO_PKG_VERSION"),
     };
     let thinker = team.main_bot().provider.clone();
     status.chat = brains.ready(&thinker);
@@ -214,6 +222,31 @@ fn open_link(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Couldn't open the link: {e}"))
+}
+
+/// Adds something every bot should know about you, from Settings › Memory.
+#[tauri::command]
+fn remember(fact: String, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::Remember(fact))
+}
+
+/// Forgets one fact exactly as saved, or everything when `fact` is missing.
+#[tauri::command]
+fn forget(fact: Option<String>, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::Forget(fact))
+}
+
+/// Shows the folder where Voxen keeps what the bots remember, your tasks and pictures. It
+/// takes no path, so nothing else can be opened through it.
+#[tauri::command]
+fn open_data(state: State<'_, CallState>) -> Result<(), String> {
+    let data = state.root.join("data");
+    let folder = if data.is_dir() { data } else { state.root.clone() };
+    std::process::Command::new("open")
+        .arg(folder)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't open the folder: {e}"))
 }
 
 /// Makes everything in the window bigger or smaller, from Settings › Look.

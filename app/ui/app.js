@@ -937,6 +937,10 @@ function onUpdate(u) {
       addLine(room, el("p", "notice task", `${u.bot}'s task: ${u.task}`));
       if (!here) markUnread(room);
       break;
+    case "memory":
+      memory = u.facts;
+      refreshSettings();
+      break;
     case "problem":
       note(room, u.text);
       if (inSettings()) $("settings-note").textContent = u.text;
@@ -1436,7 +1440,19 @@ $("group-form").addEventListener("submit", async (e) => {
 // keys and memory when it's shown, and again when they change.
 
 const settings = $("settings");
-const panes = { keys: renderKeys, bots: renderBots, rooms: renderRooms, voice: renderVoice, look: renderLook };
+const panes = {
+  keys: renderKeys,
+  bots: renderBots,
+  rooms: renderRooms,
+  voice: renderVoice,
+  look: renderLook,
+  memory: renderMemory,
+  data: () => {},
+  shortcuts: () => {},
+  about: renderAbout,
+};
+let memory = []; // what the bots remember about you
+let version = "";
 let pane = "keys";
 const inSettings = () => !settings.hidden;
 
@@ -1498,7 +1514,7 @@ function setRow(icon, lines, actions) {
   text.append(...lines);
   const buttons = el("div", "set-actions");
   buttons.append(...actions);
-  row.append(icon, text, buttons);
+  row.append(...(icon ? [icon] : []), text, buttons);
   return row;
 }
 
@@ -1588,6 +1604,31 @@ $("look-form").addEventListener("change", (e) => {
   if (e.target.name === "zoom") applyZoom();
   else window.applyLook();
 });
+
+// Memory
+
+function renderMemory() {
+  const rows = memory.map((fact) => setRow(null, [el("span", "fact", fact)], [button("ghost", "Forget", () => change("forget", { fact }))]));
+  $("memory-list").replaceChildren(...(rows.length ? rows : [el("li", "set-empty", "Nothing yet. Tell any bot “Remember I'm vegetarian”, or add it above.")]));
+  $("memory-forget-all").replaceChildren(...(memory.length > 1 ? [confirmButton("Forget everything", "Forget all of it?", () => change("forget", { fact: null }))] : []));
+}
+
+$("memory-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const fact = $("memory-input").value.trim();
+  if (!fact) return;
+  change("remember", { fact });
+  $("memory-input").value = "";
+});
+
+// Privacy & data, and About
+
+$("open-data").addEventListener("click", () => change("open_data", {}));
+
+function renderAbout() {
+  $("about-version").textContent = version;
+  if (!$("about-mark").firstChild) $("about-mark").replaceChildren(voiceprint("voxen", ink(), 48, false, true));
+}
 
 // Keys
 
@@ -1694,6 +1735,8 @@ async function start() {
   keys = status.keys;
   providers = status.providers;
   voiceReady = status.voice;
+  memory = status.memory || [];
+  version = status.version || "";
   paintMarks();
   renderRail();
   renderSetup();
