@@ -3,3 +3,4 @@
 app/gen/
 # What the bots remember, your reminders and pictures: personal, never committed
 /data/
+.DS_Store
