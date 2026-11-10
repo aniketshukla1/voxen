@@ -105,7 +105,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             status, open, send, attach, stop, clear, voice, add_bot, update_bot, set_main,
-            remove_bot, add_group, update_group, remove_group, voices, models, save_keys, open_link
+            remove_bot, add_group, update_group, remove_group, voices, models, save_keys, open_link,
+            zoom
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -213,6 +214,12 @@ fn open_link(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Couldn't open the link: {e}"))
+}
+
+/// Makes everything in the window bigger or smaller, from Settings › Look.
+#[tauri::command]
+fn zoom(scale: f64, window: tauri::WebviewWindow) -> Result<(), String> {
+    window.set_zoom(scale.clamp(0.5, 2.0)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

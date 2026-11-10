@@ -38,7 +38,23 @@ const $ = (id) => document.getElementById(id);
 const stage = $("stage");
 const input = $("input");
 const composer = $("composer");
-const still = matchMedia("(prefers-reduced-motion: reduce)");
+// Motion and theme follow the classes theme.js sets from Settings and the Mac.
+const still = { get matches() { return document.documentElement.classList.contains("still"); } };
+// Choices in Settings that only change this window, kept in its local storage.
+const prefs = {
+  get(name, fallback) {
+    try {
+      return localStorage.getItem(`voxen.${name}`) || fallback;
+    } catch {
+      return fallback;
+    }
+  },
+  set(name, value) {
+    try {
+      localStorage.setItem(`voxen.${name}`, value);
+    } catch {} // a window without storage forgets the choice at restart
+  },
+};
 
 let team = { main: "", bots: [], groups: [] };
 let keys = { claude: false, deepgram: false, elevenlabs: false, xai: false };
@@ -340,7 +356,7 @@ function flatPainter(canvas) {
   };
 }
 
-const lightScheme = matchMedia("(prefers-color-scheme: light)");
+const lightScheme = { get matches() { return document.documentElement.classList.contains("light"); } };
 const rgbOf = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255 || 0);
 
 // `alive` bodies keep moving at rest; `gpu` false keeps a big body on the flat painter.
@@ -1420,7 +1436,7 @@ $("group-form").addEventListener("submit", async (e) => {
 // keys and memory when it's shown, and again when they change.
 
 const settings = $("settings");
-const panes = { keys: renderKeys, bots: renderBots, rooms: renderRooms };
+const panes = { keys: renderKeys, bots: renderBots, rooms: renderRooms, voice: renderVoice, look: renderLook };
 let pane = "keys";
 const inSettings = () => !settings.hidden;
 
@@ -1536,6 +1552,43 @@ function renderRooms() {
 }
 $("settings-new-room").addEventListener("click", () => openGroupDialog());
 
+// Voice
+
+function renderVoice() {
+  const missing = VOICE_KEYS.filter((k) => !keys[k.key]).map((k) => k.name);
+  const said = voiceReady
+    ? "Voice is ready: Deepgram listens and ElevenLabs speaks."
+    : missing.length
+      ? `Voice needs your ${and(missing)} key${missing.length > 1 ? "s" : ""}.`
+      : "Voice needs a speaker or headphones.";
+  const state = [el("span", voiceReady ? "pill ok" : "pill", voiceReady ? "Ready" : "Off"), el("span", "", said)];
+  if (missing.length) state.push(button("ghost", "Add keys", () => openSettings("keys")));
+  $("voice-state").replaceChildren(...state);
+  $("voice-start").checked = prefs.get("voice-start", "off") === "on";
+  $("voice-start").disabled = !voiceReady;
+}
+$("voice-start").addEventListener("change", (e) => prefs.set("voice-start", e.target.checked ? "on" : "off"));
+
+// Look: theme and motion go through theme.js; size is the window's own zoom.
+
+function renderLook() {
+  for (const [name, fallback] of [["theme", "system"], ["zoom", "1"], ["motion", "full"]]) {
+    const value = prefs.get(name, fallback);
+    $("look-form").querySelectorAll(`input[name="${name}"]`).forEach((r) => (r.checked = r.value === value));
+  }
+}
+
+function applyZoom() {
+  const scale = Number(prefs.get("zoom", "1")) || 1;
+  if (tauri) call.invoke("zoom", { scale }).catch(() => {});
+}
+
+$("look-form").addEventListener("change", (e) => {
+  prefs.set(e.target.name, e.target.value);
+  if (e.target.name === "zoom") applyZoom();
+  else window.applyLook();
+});
+
 // Keys
 
 const VOICE_KEYS = [
@@ -1620,10 +1673,14 @@ function paintMarks() {
   setPrint($("you").firstChild, state);
 }
 
-// Ink-coloured prints are drawn once, so they're repainted when the Mac switches light and dark.
-matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+// Ink-coloured prints are drawn once, so they're repainted when the theme changes; moving
+// again after Reduced motion restarts the frames.
+addEventListener("look", () => {
   paintMarks();
   renderRail();
+  renderCast();
+  animate();
+  refreshSettings();
 });
 
 async function start() {
@@ -1645,6 +1702,8 @@ async function start() {
   $("note").textContent = status.problem || "";
   // No pop-up on first run: the empty room says what's missing and offers the way to add it.
   $("setup-cta").hidden = !(tauri && !status.chat);
+  applyZoom();
+  if (voiceReady && prefs.get("voice-start", "off") === "on") setVoice(true);
 }
 
 start();

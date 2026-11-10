@@ -24,23 +24,22 @@
   color-scheme: dark;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f5f1;
-    --panel: #efede7;
-    --raise: #e5e2da;
-    --line: #dcd8ce;
-    --text: #121214;
-    --text-2: #55555f;
-    --text-3: #6a6a74;
-    --accent: #121214;
-    --on-accent: #f6f5f1;
-    --warn: #9a6408;
-    --ok: #0f7a6f;
-    --shadow: rgb(40 36 28 / 0.18);
-    --scrim: rgb(40 36 28 / 0.28);
-    color-scheme: light;
-  }
+/* Light, when the Mac is light or you pick it in Settings (theme.js sets the class) */
+:root.light {
+  --bg: #f6f5f1;
+  --panel: #efede7;
+  --raise: #e5e2da;
+  --line: #dcd8ce;
+  --text: #121214;
+  --text-2: #55555f;
+  --text-3: #6a6a74;
+  --accent: #121214;
+  --on-accent: #f6f5f1;
+  --warn: #9a6408;
+  --ok: #0f7a6f;
+  --shadow: rgb(40 36 28 / 0.18);
+  --scrim: rgb(40 36 28 / 0.28);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -437,6 +436,26 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .set-empty { padding: 16px 14px; color: var(--text-3); font-size: 13px; }
 .tag { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2); font-size: 10.5px; font-weight: 500; vertical-align: 1px; }
 .ghost.danger { border-color: var(--danger); color: var(--danger); }
+/* Choices: a segmented row of options, and an on/off switch */
+.set-field { display: flex; flex-direction: column; gap: 8px; }
+.set-field legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 500; }
+.seg { display: inline-flex; flex-wrap: wrap; align-self: flex-start; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius); }
+.seg label { position: relative; }
+.seg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.seg span { display: block; padding: 5px 12px; border-radius: calc(var(--radius) - 3px); color: var(--text-2); font-size: 12.5px; }
+.seg label:hover span { color: var(--text); }
+.seg input:checked + span { background: var(--raise); color: var(--text); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.switch-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.switch-row input { appearance: none; position: relative; flex-shrink: 0; width: 34px; height: 20px; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--raise); cursor: pointer; transition: background 0.2s; }
+.switch-row input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-3); transition: transform 0.2s, background 0.2s; }
+.switch-row input:checked { border-color: var(--accent); background: var(--accent); }
+.switch-row input:checked::after { background: var(--on-accent); transform: translateX(14px); }
+.switch-row input:disabled { opacity: 0.4; cursor: default; }
+.set-status { display: flex; align-items: center; gap: 10px; min-height: 32px; color: var(--text-2); font-size: 13px; }
+.set-status .pill { margin-left: 0; }
+.set-status .ghost { margin-left: auto; }
+.tips { margin: -4px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; line-height: 1.75; }
 @media (max-width: 720px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .set-nav { flex-direction: row; overflow-x: auto; padding: 4px 16px 10px; }
@@ -445,12 +464,10 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .room-btn.unread .ico::after { content: ""; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--panel); }
 
 /* Light: hues get darker so names and voiceprints read on paper */
-@media (prefers-color-scheme: light) {
-  canvas.print:not(.body) { filter: brightness(0.74) saturate(1.3); }
-  .line:not(.you) .who, .member .n, .welcome-line em { color: oklch(from var(--c) min(l, 0.5) c h); }
-}
+.light canvas.print:not(.body) { filter: brightness(0.74) saturate(1.3); }
+.light :is(.line:not(.you) .who, .member .n, .welcome-line em) { color: oklch(from var(--c) min(l, 0.5) c h); }
 
-/* Motion, off when the Mac's Reduce Motion is on */
+/* Motion, off when reduced in Settings or by the Mac's Reduce Motion (theme.js sets the class) */
 @keyframes word { from { opacity: 0; filter: blur(4px); } }
 @keyframes breathe { to { opacity: 0.6; transform: scale(1.08); } }
 @keyframes enter { from { opacity: 0; transform: translateY(8px); } }
@@ -463,6 +480,4 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
   15%, 85% { opacity: 1; }
   100% { opacity: 0; transform: translate(var(--x1), var(--y)) scale(0.5); }
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
+.still *, .still *::before, .still *::after { animation: none !important; transition: none !important; }

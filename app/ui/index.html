@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Voxen</title>
   <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <nav id="rail" class="rail" aria-label="Rooms">
@@ -152,6 +153,8 @@
         <button type="button" data-pane="keys">Keys</button>
         <button type="button" data-pane="bots">Bots</button>
         <button type="button" data-pane="rooms">Rooms</button>
+        <button type="button" data-pane="voice">Voice</button>
+        <button type="button" data-pane="look">Look</button>
       </nav>
       <div class="set-panes">
         <section class="pane" data-pane="keys" aria-labelledby="pane-keys">
@@ -181,6 +184,54 @@
           <p class="pane-sub">Group chats where two or more bots take turns and talk it over with you.</p>
           <ul id="room-list" class="set-list"></ul>
           <div><button id="settings-new-room" class="ghost big" type="button">New room</button></div>
+        </section>
+        <section class="pane" data-pane="voice" aria-labelledby="pane-voice" hidden>
+          <h2 id="pane-voice">Voice</h2>
+          <p class="pane-sub">Talk to your bots and hear each one answer in its own voice.</p>
+          <div id="voice-state" class="set-status" role="status"></div>
+          <label class="switch-row">
+            <span class="set-text"><b>Start with voice on</b><small>Opens the mic as soon as Voxen starts.</small></span>
+            <input id="voice-start" type="checkbox" role="switch">
+          </label>
+          <h3 class="group-title">Tips</h3>
+          <ul class="tips">
+            <li>Use headphones. Through speakers the bots hear themselves and stop.</li>
+            <li>Talk over a bot, press Esc or click Stop to cut it off.</li>
+            <li>⌘D turns voice on and off from anywhere.</li>
+            <li>Each bot's voice and speaking speed are in Bots, under Edit.</li>
+          </ul>
+        </section>
+        <section class="pane" data-pane="look" aria-labelledby="pane-look" hidden>
+          <h2 id="pane-look">Look</h2>
+          <p class="pane-sub">How Voxen looks on this Mac.</p>
+          <form id="look-form" class="pane-form">
+            <fieldset class="set-field">
+              <legend>Theme</legend>
+              <div class="seg">
+                <label><input type="radio" name="theme" value="system"><span>Match the Mac</span></label>
+                <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+                <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="set-field">
+              <legend>Size</legend>
+              <div class="seg">
+                <label><input type="radio" name="zoom" value="0.9"><span>Smaller</span></label>
+                <label><input type="radio" name="zoom" value="1"><span>Default</span></label>
+                <label><input type="radio" name="zoom" value="1.1"><span>Larger</span></label>
+                <label><input type="radio" name="zoom" value="1.25"><span>Largest</span></label>
+              </div>
+              <p class="hint">Makes everything in the window bigger or smaller, text and Orbs alike.</p>
+            </fieldset>
+            <fieldset class="set-field">
+              <legend>Motion</legend>
+              <div class="seg">
+                <label><input type="radio" name="motion" value="full"><span>Full</span></label>
+                <label><input type="radio" name="motion" value="reduced"><span>Reduced</span></label>
+              </div>
+              <p class="hint">Reduced keeps the Orbs still and turns animations off. It's always reduced while Reduce Motion is on in macOS.</p>
+            </fieldset>
+          </form>
         </section>
       </div>
     </div>
