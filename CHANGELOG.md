@@ -7,6 +7,8 @@ What changed in each Voxen release, newest first.
 ### Added
 
 - A Settings page (⌘, or the button at the bottom of the sidebar), with your keys in it.
+- Settings › Bots: edit any bot, make another one the main bot, or remove one.
+- Settings › Rooms: change who's in a room, or remove it.
 
 ### Changed
 

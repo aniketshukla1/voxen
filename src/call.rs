@@ -54,7 +54,14 @@ pub enum Command {
     AddBot(Bot),
     /// Change a bot, found by name: its brain, voice, colour or what it's for.
     UpdateBot(Bot),
+    /// Make another bot the main one.
+    SetMain(String),
+    /// Remove a bot, found by name. It leaves its groups too.
+    RemoveBot(String),
     AddGroup(Group),
+    /// Change who is in a group, found by name.
+    UpdateGroup(Group),
+    RemoveGroup(String),
     /// Something outside the conversations went wrong, to pass on as an update.
     Problem(String),
 }
@@ -389,8 +396,18 @@ impl State {
             Command::Attach(files) => self.attached = files,
             Command::AddBot(bot) => shared.change_team(&self.open, |team| team.add_bot(bot)),
             Command::UpdateBot(bot) => shared.change_team(&self.open, |team| team.update_bot(bot)),
+            Command::SetMain(name) => shared.change_team(&self.open, |team| team.set_main(&name)),
+            Command::RemoveBot(name) => {
+                shared.change_team(&self.open, |team| team.remove_bot(&name))
+            }
             Command::AddGroup(group) => {
                 shared.change_team(&self.open, |team| team.add_group(group))
+            }
+            Command::UpdateGroup(group) => {
+                shared.change_team(&self.open, |team| team.update_group(group))
+            }
+            Command::RemoveGroup(name) => {
+                shared.change_team(&self.open, |team| team.remove_group(&name))
             }
             Command::Problem(text) => shared.send(&self.open, Update::Problem { text }),
         }

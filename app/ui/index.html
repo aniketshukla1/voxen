@@ -134,7 +134,7 @@
       <p id="group-error" class="form-error" role="alert"></p>
       <div class="sheet-actions">
         <button class="ghost big" type="button" data-close>Cancel</button>
-        <button class="solid" type="submit">Open room</button>
+        <button id="group-save" class="solid" type="submit">Open room</button>
       </div>
     </form>
   </dialog>
@@ -150,6 +150,8 @@
     <div class="settings-body">
       <nav id="set-nav" class="set-nav" aria-label="Settings sections">
         <button type="button" data-pane="keys">Keys</button>
+        <button type="button" data-pane="bots">Bots</button>
+        <button type="button" data-pane="rooms">Rooms</button>
       </nav>
       <div class="set-panes">
         <section class="pane" data-pane="keys" aria-labelledby="pane-keys">
@@ -167,6 +169,18 @@
               <button id="keys-save" class="solid" type="submit">Save and restart</button>
             </div>
           </form>
+        </section>
+        <section class="pane" data-pane="bots" aria-labelledby="pane-bots" hidden>
+          <h2 id="pane-bots">Bots</h2>
+          <p class="pane-sub">Each bot has its own voice, personality and model. The main bot is the one you talk to when Voxen opens.</p>
+          <ul id="bot-list" class="set-list"></ul>
+          <div><button id="settings-new-bot" class="ghost big" type="button">New voice</button></div>
+        </section>
+        <section class="pane" data-pane="rooms" aria-labelledby="pane-rooms" hidden>
+          <h2 id="pane-rooms">Rooms</h2>
+          <p class="pane-sub">Group chats where two or more bots take turns and talk it over with you.</p>
+          <ul id="room-list" class="set-list"></ul>
+          <div><button id="settings-new-room" class="ghost big" type="button">New room</button></div>
         </section>
       </div>
     </div>

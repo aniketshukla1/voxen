@@ -104,8 +104,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, open, send, attach, stop, clear, voice, add_bot, update_bot, add_group, voices,
-            models, save_keys, open_link
+            status, open, send, attach, stop, clear, voice, add_bot, update_bot, set_main,
+            remove_bot, add_group, update_group, remove_group, voices, models, save_keys, open_link
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -234,6 +234,29 @@ fn add_bot(bot: Bot, state: State<'_, CallState>) -> Result<(), String> {
 #[tauri::command]
 fn update_bot(bot: Bot, state: State<'_, CallState>) -> Result<(), String> {
     state.tell(Command::UpdateBot(bot))
+}
+
+/// Makes another bot the main one, the bot you talk to by default.
+#[tauri::command]
+fn set_main(name: String, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::SetMain(name))
+}
+
+/// Removes a bot (not the main one) and takes it out of its group chats.
+#[tauri::command]
+fn remove_bot(name: String, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::RemoveBot(name))
+}
+
+/// Changes who is in a group chat.
+#[tauri::command]
+fn update_group(group: Group, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::UpdateGroup(group))
+}
+
+#[tauri::command]
+fn remove_group(name: String, state: State<'_, CallState>) -> Result<(), String> {
+    state.tell(Command::RemoveGroup(name))
 }
 
 /// The models a provider offers right now.

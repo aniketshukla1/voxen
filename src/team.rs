@@ -137,6 +137,54 @@ impl Team {
         Ok(())
     }
 
+    /// Makes another bot the main one: the bot you talk to by default.
+    pub fn set_main(&mut self, name: &str) -> Result<()> {
+        let name = self.bot(name).with_context(|| format!("there's no bot called {name}"))?.name.clone();
+        self.edit(|team| team.main = name)
+    }
+
+    /// Removes a bot and takes it out of its groups; a group left with one bot goes too.
+    /// The main bot stays until another bot is made the main one.
+    pub fn remove_bot(&mut self, name: &str) -> Result<()> {
+        ensure!(self.bot(name).is_some(), "there's no bot called {name}");
+        ensure!(!same(name, &self.main), "{name} is the main bot; make another bot the main one first");
+        self.edit(|team| {
+            team.bots.retain(|b| !same(&b.name, name));
+            for group in &mut team.groups {
+                group.bots.retain(|b| !same(b, name));
+            }
+            team.groups.retain(|g| g.bots.len() >= 2);
+        })
+    }
+
+    /// Changes who is in a group, found by name.
+    pub fn update_group(&mut self, group: Group) -> Result<()> {
+        let at = self
+            .groups
+            .iter()
+            .position(|g| same(&g.name, &group.name))
+            .with_context(|| format!("there's no group called {}", group.name))?;
+        self.check_group(&group)?;
+        let group = Group { name: self.groups[at].name.clone(), ..group };
+        self.edit(|team| team.groups[at] = group)
+    }
+
+    pub fn remove_group(&mut self, name: &str) -> Result<()> {
+        ensure!(self.group(name).is_some(), "there's no group called {name}");
+        self.edit(|team| team.groups.retain(|g| !same(&g.name, name)))
+    }
+
+    /// Makes a change and saves the team file, or undoes the change if it can't be saved.
+    fn edit(&mut self, change: impl FnOnce(&mut Self)) -> Result<()> {
+        let before = (self.main.clone(), self.bots.clone(), self.groups.clone());
+        change(self);
+        if let Err(e) = self.rewrite() {
+            (self.main, self.bots, self.groups) = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Writes the whole team file again, after a change to something already in it.
     fn rewrite(&self) -> Result<()> {
         let Some(path) = &self.path else {
@@ -362,6 +410,28 @@ bots = ["Maya", "Sam"]
         sam.provider = "nobody".into();
         assert!(team.update_bot(sam).is_err());
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn bots_and_groups_change_and_go() {
+        let mut team = Team::parse(TEAM).unwrap();
+        assert!(team.remove_bot("maya").is_err(), "the main bot stays");
+        assert!(team.set_main("nobody").is_err());
+        team.set_main("sam").unwrap();
+        assert_eq!(team.main, "Sam");
+        team.remove_bot("Maya").unwrap();
+        assert!(team.bot("Maya").is_none());
+        assert!(team.groups.is_empty(), "a group left with one bot goes too");
+        let pair = Group { name: "Pair".into(), bots: names(&["Sam", "Leo"]) };
+        team.add_group(pair).unwrap();
+        let alone = Group { name: "pair".into(), bots: names(&["Sam"]) };
+        assert!(team.update_group(alone).is_err(), "a group needs two bots");
+        team.add_bot(Bot { name: "Ava".into(), ..team.bot("Leo").unwrap().clone() }).unwrap();
+        team.update_group(Group { name: "pair".into(), bots: names(&["Sam", "Ava"]) }).unwrap();
+        assert_eq!(team.group("Pair").unwrap().name, "Pair", "the name keeps its spelling");
+        assert_eq!(team.group("Pair").unwrap().bots, names(&["Sam", "Ava"]));
+        team.remove_group("PAIR").unwrap();
+        assert!(team.remove_group("Pair").is_err());
     }
 
     #[test]

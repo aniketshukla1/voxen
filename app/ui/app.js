@@ -547,7 +547,7 @@ function renderRail() {
 
 function markOpen() {
   document.querySelectorAll(".room-btn").forEach((r) => {
-    if (r.dataset.room === open) {
+    if (r.dataset.room === open && !inSettings()) {
       r.setAttribute("aria-current", "page");
       r.classList.remove("unread");
     } else r.removeAttribute("aria-current");
@@ -819,18 +819,23 @@ function onUpdate(u) {
   const live = lives[room];
   const here = room === open;
   switch (u.kind) {
-    case "team":
+    case "team": {
+      const mainBefore = team.main;
       team = { main: u.main, bots: u.bots, groups: u.groups };
       renderRail();
       renderHeader();
       renderSetup();
       refreshSettings();
+      // A room that's gone falls back to the main chat, which shows a new main bot at once.
+      if (!exists(open)) openRoom("main");
+      else if (open === "main" && mainBefore !== team.main) openRoom("main");
       if (pendingOpen && exists(pendingOpen)) {
         const next = pendingOpen;
         pendingOpen = null;
         openRoom(next);
       }
       break;
+    }
     case "you":
       if (demoed.delete(room)) wipe(room); // a real conversation replaces the demo
       if (here) {
@@ -1360,11 +1365,19 @@ $("bot-form").addEventListener("submit", async (e) => {
 // New room
 
 let picked = new Set();
+let regrouping = null; // the room being changed in the room dialog, or null for a new one
 
-function openGroupDialog() {
+// Opens the room dialog for a new room, or with `existing` to change who's in it (the name stays).
+function openGroupDialog(existing) {
+  regrouping = existing || null;
   $("group-form").reset();
   $("group-error").textContent = "";
-  picked = new Set();
+  picked = new Set(existing?.bots || []);
+  const nameField = $("group-form").elements.namedItem("name");
+  nameField.value = existing?.name || "";
+  nameField.readOnly = Boolean(existing);
+  $("group-title").textContent = existing ? existing.name : "New room";
+  $("group-save").textContent = existing ? "Save room" : "Open room";
   $("group-bots").replaceChildren(
     ...team.bots.map((b) => {
       const pick = button("pick", "", () => {
@@ -1373,7 +1386,7 @@ function openGroupDialog() {
         pick.setAttribute("aria-pressed", String(picked.has(b.name)));
         $("group-error").textContent = "";
       });
-      pick.setAttribute("aria-pressed", "false");
+      pick.setAttribute("aria-pressed", String(picked.has(b.name)));
       const who = el("span", "who-pick");
       who.append(el("b", "", b.name), el("small", "", b.role));
       pick.append(body(b.name, hue(b.name), 32), who);
@@ -1388,18 +1401,18 @@ $("group-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("group-form").elements.namedItem("name").value.trim();
   const bots = team.bots.filter((b) => picked.has(b.name)).map((b) => b.name);
-  const error = !name ? "Give the room a name." : taken(name) ? `${name} is already taken.` : bots.length < 2 ? "Pick at least two voices." : "";
+  const error = !name ? "Give the room a name." : !regrouping && taken(name) ? `${name} is already taken.` : bots.length < 2 ? "Pick at least two voices." : "";
   if (error) {
     $("group-error").textContent = error;
     return;
   }
   try {
-    await call.invoke("add_group", { group: { name, bots } });
+    await call.invoke(regrouping ? "update_group" : "add_group", { group: { name, bots } });
   } catch (err) {
     $("group-error").textContent = String(err);
     return;
   }
-  pendingOpen = `group:${name}`;
+  if (!regrouping) pendingOpen = `group:${name}`;
   $("group-dialog").close();
 });
 
@@ -1407,7 +1420,7 @@ $("group-form").addEventListener("submit", async (e) => {
 // keys and memory when it's shown, and again when they change.
 
 const settings = $("settings");
-const panes = { keys: renderKeys };
+const panes = { keys: renderKeys, bots: renderBots, rooms: renderRooms };
 let pane = "keys";
 const inSettings = () => !settings.hidden;
 
@@ -1450,6 +1463,78 @@ $("set-nav").addEventListener("click", (e) => {
 });
 $("settings-done").addEventListener("click", closeSettings);
 $("setup-cta").addEventListener("click", () => openSettings("keys"));
+
+// Tells the conversations about a change made in Settings; the new team comes back as an
+// update, and a refusal shows at the top of the page.
+async function change(command, args) {
+  $("settings-note").textContent = "";
+  try {
+    await call.invoke(command, args);
+  } catch (err) {
+    $("settings-note").textContent = String(err);
+  }
+}
+
+// One line of a Settings list: an icon, a few lines of text and its buttons.
+function setRow(icon, lines, actions) {
+  const row = el("li", "set-row");
+  const text = el("div", "set-text");
+  text.append(...lines);
+  const buttons = el("div", "set-actions");
+  buttons.append(...actions);
+  row.append(icon, text, buttons);
+  return row;
+}
+
+// A button that asks once more ("Remove Sam?") before doing what can't be undone.
+function confirmButton(label, ask, act) {
+  const b = button("ghost", label, () => {
+    if (b.dataset.sure) return act();
+    b.dataset.sure = "1";
+    b.textContent = ask;
+    b.classList.add("danger");
+    setTimeout(() => {
+      delete b.dataset.sure;
+      b.textContent = label;
+      b.classList.remove("danger");
+    }, 4000);
+  });
+  return b;
+}
+
+// Bots
+
+function renderBots() {
+  $("bot-list").replaceChildren(
+    ...team.bots.map((b) => {
+      const main = same(b.name, team.main);
+      const name = el("b", "", b.name);
+      if (main) name.append(el("span", "tag", "Main"));
+      const actions = [button("ghost", "Edit", () => openBotDialog(b))];
+      if (!main) {
+        actions.push(
+          button("ghost", "Make main", () => change("set_main", { name: b.name })),
+          confirmButton("Remove", `Remove ${b.name}?`, () => change("remove_bot", { name: b.name })),
+        );
+      }
+      return setRow(body(b.name, hue(b.name), 36), [name, el("small", "", b.role), el("small", "", brainLabel(b))], actions);
+    }),
+  );
+}
+$("settings-new-bot").addEventListener("click", () => openBotDialog());
+
+// Rooms
+
+function renderRooms() {
+  const rows = team.groups.map((g) =>
+    setRow(groupBody(g, 36), [el("b", "", g.name), el("small", "", and(g.bots))], [
+      button("ghost", "Edit", () => openGroupDialog(g)),
+      confirmButton("Remove", `Remove ${g.name}?`, () => change("remove_group", { name: g.name })),
+    ]),
+  );
+  $("room-list").replaceChildren(...(rows.length ? rows : [el("li", "set-empty", "No rooms yet. Make one and your bots talk things over with you.")]));
+}
+$("settings-new-room").addEventListener("click", () => openGroupDialog());
 
 // Keys
 
@@ -1520,7 +1605,7 @@ $("keys-form").addEventListener("submit", async (e) => {
 $("settings-btn").addEventListener("click", () => openSettings());
 $("new-bot").addEventListener("click", () => openBotDialog());
 $("edit").addEventListener("click", () => openBotDialog(bot(members(open)[0])));
-$("new-group").addEventListener("click", openGroupDialog);
+$("new-group").addEventListener("click", () => openGroupDialog());
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 // A closed dialog's prints stay in the page, so they stop moving.
 document.querySelectorAll("dialog").forEach((d) => d.addEventListener("close", () => d.querySelectorAll("canvas").forEach((c) => setPrint(c, "idle"))));
