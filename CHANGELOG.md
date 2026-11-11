@@ -20,6 +20,10 @@ What changed in each Voxen release, newest first.
 
 - No setup dialog on first run. The empty room says what's missing, and its button opens
   Settings at Keys.
+- Settings has a new look: an icon for every section and row, and Keys is now Connections.
+  It shows whether chat and voice are ready, which bots use each service, and whether each
+  key works (Voxen asks each provider for its models). You connect, replace or disconnect a
+  key in place. Look shows each theme as a small window, and Voice ticks off what it needs.
 
 ### Fixed
 

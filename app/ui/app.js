@@ -952,7 +952,7 @@ function onUpdate(u) {
 
 async function setVoice(on) {
   if (on && !voiceReady) {
-    openSettings("keys");
+    openSettings("voice");
     return;
   }
   stopDemo();
@@ -1440,6 +1440,7 @@ $("group-form").addEventListener("submit", async (e) => {
 // keys and memory when it's shown, and again when they change.
 
 const settings = $("settings");
+const scroller = document.querySelector(".set-panes");
 const panes = {
   keys: renderKeys,
   bots: renderBots,
@@ -1457,6 +1458,7 @@ let pane = "keys";
 const inSettings = () => !settings.hidden;
 
 function openSettings(to = pane) {
+  const moved = to !== pane;
   pane = panes[to] ? to : "keys";
   stage.hidden = true;
   settings.hidden = false;
@@ -1468,6 +1470,7 @@ function openSettings(to = pane) {
   });
   document.querySelectorAll(".pane").forEach((p) => (p.hidden = p.dataset.pane !== pane));
   $("settings-note").textContent = "";
+  if (moved) scroller.scrollTop = 0;
   panes[pane]();
 }
 
@@ -1496,6 +1499,58 @@ $("set-nav").addEventListener("click", (e) => {
 $("settings-done").addEventListener("click", closeSettings);
 $("setup-cta").addEventListener("click", () => openSettings("keys"));
 
+// A line icon from the sprite in index.html.
+function icon(name, className = "i") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function tile(name) {
+  const t = el("span", "tile");
+  t.append(icon(name));
+  return t;
+}
+
+// A button with an icon before its words, or only the icon (`quiet`), named by `label` then.
+function iconButton(name, label, onClick, quiet = false) {
+  const b = button(quiet ? "ghost icon" : "ghost with-icon", "", onClick);
+  b.append(icon(name));
+  if (quiet) {
+    b.setAttribute("aria-label", label);
+    b.title = label;
+  } else b.append(label);
+  return b;
+}
+
+// A button that asks once more ("Remove?") before doing what can't be undone.
+function confirmButton(name, label, ask, act, quiet = true) {
+  const b = iconButton(name, label, () => {
+    if (b.dataset.sure) return act();
+    b.dataset.sure = "1";
+    b.classList.add("danger");
+    b.replaceChildren(ask);
+    setTimeout(() => {
+      delete b.dataset.sure;
+      b.classList.remove("danger");
+      b.replaceChildren(icon(name), ...(quiet ? [] : [label]));
+    }, 4000);
+  }, quiet);
+  return b;
+}
+
+// A button that opens a service's site in your browser.
+function linkButton(label, site) {
+  const b = button("ghost with-icon", label, () => {});
+  b.dataset.url = site.startsWith("http") ? site : `https://${site}`;
+  b.append(icon("arrow"));
+  return b;
+}
+
 // Tells the conversations about a change made in Settings; the new team comes back as an
 // update, and a refusal shows at the top of the page.
 async function change(command, args) {
@@ -1507,177 +1562,242 @@ async function change(command, args) {
   }
 }
 
-// One line of a Settings list: an icon, a few lines of text and its buttons.
-function setRow(icon, lines, actions) {
+// One line of a Settings list: what it starts with, a few lines of text and its buttons.
+function setRow(lead, lines, actions = []) {
   const row = el("li", "set-row");
   const text = el("div", "set-text");
   text.append(...lines);
   const buttons = el("div", "set-actions");
   buttons.append(...actions);
-  row.append(...(icon ? [icon] : []), text, buttons);
+  row.append(...(lead ? [lead] : []), text, buttons);
   return row;
 }
 
-// A button that asks once more ("Remove Sam?") before doing what can't be undone.
-function confirmButton(label, ask, act) {
-  const b = button("ghost", label, () => {
-    if (b.dataset.sure) return act();
-    b.dataset.sure = "1";
-    b.textContent = ask;
-    b.classList.add("danger");
-    setTimeout(() => {
-      delete b.dataset.sure;
-      b.textContent = label;
-      b.classList.remove("danger");
-    }, 4000);
-  });
-  return b;
+function emptyRow(iconName, title, line) {
+  const li = el("li", "set-empty");
+  li.append(tile(iconName), el("b", "", title), el("span", "", line));
+  return li;
 }
 
-// Bots
-
-function renderBots() {
-  $("bot-list").replaceChildren(
-    ...team.bots.map((b) => {
-      const main = same(b.name, team.main);
-      const name = el("b", "", b.name);
-      if (main) name.append(el("span", "tag", "Main"));
-      const actions = [button("ghost", "Edit", () => openBotDialog(b))];
-      if (!main) {
-        actions.push(
-          button("ghost", "Make main", () => change("set_main", { name: b.name })),
-          confirmButton("Remove", `Remove ${b.name}?`, () => change("remove_bot", { name: b.name })),
-        );
-      }
-      return setRow(body(b.name, hue(b.name), 36), [name, el("small", "", b.role), el("small", "", brainLabel(b))], actions);
-    }),
-  );
-}
-$("settings-new-bot").addEventListener("click", () => openBotDialog());
-
-// Rooms
-
-function renderRooms() {
-  const rows = team.groups.map((g) =>
-    setRow(groupBody(g, 36), [el("b", "", g.name), el("small", "", and(g.bots))], [
-      button("ghost", "Edit", () => openGroupDialog(g)),
-      confirmButton("Remove", `Remove ${g.name}?`, () => change("remove_group", { name: g.name })),
-    ]),
-  );
-  $("room-list").replaceChildren(...(rows.length ? rows : [el("li", "set-empty", "No rooms yet. Make one and your bots talk things over with you.")]));
-}
-$("settings-new-room").addEventListener("click", () => openGroupDialog());
-
-// Voice
-
-function renderVoice() {
-  const missing = VOICE_KEYS.filter((k) => !keys[k.key]).map((k) => k.name);
-  const said = voiceReady
-    ? "Voice is ready: Deepgram listens and ElevenLabs speaks."
-    : missing.length
-      ? `Voice needs your ${and(missing)} key${missing.length > 1 ? "s" : ""}.`
-      : "Voice needs a speaker or headphones.";
-  const state = [el("span", voiceReady ? "pill ok" : "pill", voiceReady ? "Ready" : "Off"), el("span", "", said)];
-  if (missing.length) state.push(button("ghost", "Add keys", () => openSettings("keys")));
-  $("voice-state").replaceChildren(...state);
-  $("voice-start").checked = prefs.get("voice-start", "off") === "on";
-  $("voice-start").disabled = !voiceReady;
-}
-$("voice-start").addEventListener("change", (e) => prefs.set("voice-start", e.target.checked ? "on" : "off"));
-
-// Look: theme and motion go through theme.js; size is the window's own zoom.
-
-function renderLook() {
-  for (const [name, fallback] of [["theme", "system"], ["zoom", "1"], ["motion", "full"]]) {
-    const value = prefs.get(name, fallback);
-    $("look-form").querySelectorAll(`input[name="${name}"]`).forEach((r) => (r.checked = r.value === value));
-  }
-}
-
-function applyZoom() {
-  const scale = Number(prefs.get("zoom", "1")) || 1;
-  if (tauri) call.invoke("zoom", { scale }).catch(() => {});
-}
-
-$("look-form").addEventListener("change", (e) => {
-  prefs.set(e.target.name, e.target.value);
-  if (e.target.name === "zoom") applyZoom();
-  else window.applyLook();
-});
-
-// Memory
-
-function renderMemory() {
-  const rows = memory.map((fact) => setRow(null, [el("span", "fact", fact)], [button("ghost", "Forget", () => change("forget", { fact }))]));
-  $("memory-list").replaceChildren(...(rows.length ? rows : [el("li", "set-empty", "Nothing yet. Tell any bot “Remember I'm vegetarian”, or add it above.")]));
-  $("memory-forget-all").replaceChildren(...(memory.length > 1 ? [confirmButton("Forget everything", "Forget all of it?", () => change("forget", { fact: null }))] : []));
-}
-
-$("memory-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const fact = $("memory-input").value.trim();
-  if (!fact) return;
-  change("remember", { fact });
-  $("memory-input").value = "";
-});
-
-// Privacy & data, and About
-
-$("open-data").addEventListener("click", () => change("open_data", {}));
-
-function renderAbout() {
-  $("about-version").textContent = version;
-  if (!$("about-mark").firstChild) $("about-mark").replaceChildren(voiceprint("voxen", ink(), 48, false, true));
-}
-
-// Keys
+// Connections
 
 const VOICE_KEYS = [
-  { key: "DEEPGRAM_API_KEY", name: "Deepgram", help: "Listens when you talk. Needed for voice. Get a key at console.deepgram.com." },
-  { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", help: "Gives every voice its sound. Needed for voice. Get a key at elevenlabs.io under Developers." },
+  { key: "DEEPGRAM_API_KEY", name: "Deepgram", mono: "Dg", does: "Hears you when you talk", site: "console.deepgram.com" },
+  { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", mono: "11", does: "Gives every bot its voice", site: "elevenlabs.io" },
 ];
+// Each provider's two-letter mark; the brands' own logos aren't ours to use.
+const MONO = { anthropic: "Cl", openai: "Oa", google: "Ge", xai: "xA", mistral: "Mi", deepseek: "Ds", perplexity: "Px", openrouter: "Or", groq: "Gq", together: "To", fireworks: "Fw", cerebras: "Ce", moonshot: "Ki", qwen: "Qw", ollama: "Ol", lmstudio: "LM" };
+const checked = {}; // provider → what asking it for its models found, once per session
 
-// One service in Keys: its name, whether it's connected, what it's for, and where its key goes.
-function keyRow(name, state, help, fields) {
-  const row = el("div", "key");
-  const head = el("div", "key-head");
-  const pill = { connected: ["pill ok", "Connected"], missing: ["pill", "Missing"], optional: ["pill optional", "Optional"], local: ["pill optional", "No key needed"] }[state];
-  head.append(el("span", "key-name", name), el("span", pill[0], pill[1]));
-  row.append(head, el("p", "key-help", help));
-  for (const [field, placeholder, type = "password"] of fields) {
-    row.append(Object.assign(el("input"), { name: field, type, placeholder, autocomplete: "off", spellcheck: false }));
-    row.lastChild.setAttribute("aria-label", `${name}: ${placeholder}`);
+const usersOf = (p) => team.bots.filter((b) => (b.provider || "anthropic") === p.id).map((b) => b.name);
+
+// Where a provider stands: working, failing, needed by one of your bots, or not set up.
+function brainState(p) {
+  const found = checked[p.id];
+  if (!p.key) return found ?? { state: "off", text: "On your Mac" };
+  if (p.ready) return found ?? { state: "ok", text: "Connected" };
+  const users = usersOf(p);
+  return users.length ? { state: "needed", text: `Needed by ${and(users)}` } : { state: "off", text: "Not connected" };
+}
+
+// One service: its mark, what it does and for whom, whether it works, and where its key goes.
+function connRow({ provider = "", keyNames, mono, iconName, name, sub, state, stateText, site, fields }) {
+  const row = el("li", "conn");
+  Object.assign(row.dataset, { provider, state, keys: keyNames.join(" "), name: name.toLowerCase() });
+  const badge = el("span", "mono", iconName ? "" : mono);
+  if (iconName) badge.append(icon(iconName));
+  const text = el("div", "set-text");
+  text.append(el("b", "", name), el("small", "", sub));
+  const status = el("span", "conn-state");
+  status.append(el("i", "sdot"), el("span", "", stateText));
+  const actions = el("div", "set-actions");
+  const line = el("div", "set-row");
+  line.append(badge, text, status, actions);
+  row.append(line);
+  if (!fields.length) {
+    if (site) actions.append(linkButton("Get it", site));
+    return row;
   }
+  const connected = state === "ok" || state === "bad";
+  row.dataset.verb = connected ? "Replace" : "Connect";
+  actions.append(button("ghost conn-toggle", row.dataset.verb, () => (row.querySelector(".conn-edit").hidden ? openEditor(row) : closeEditor(row))));
+  const edit = el("div", "conn-edit");
+  edit.hidden = true;
+  for (const [field, placeholder, type = "password"] of fields) {
+    const box = el("div", "key-field");
+    const input = Object.assign(el("input"), { name: field, type, placeholder, autocomplete: "off", spellcheck: false });
+    input.setAttribute("aria-label", `${name}: ${placeholder}`);
+    box.append(input);
+    if (type === "password") {
+      const peek = button("bar-btn peek", "", () => {
+        input.type = input.type === "password" ? "text" : "password";
+        peek.setAttribute("aria-pressed", String(input.type === "text"));
+      });
+      peek.append(icon("eye"));
+      peek.setAttribute("aria-label", "Show the key");
+      peek.setAttribute("aria-pressed", "false");
+      box.append(peek);
+    }
+    edit.append(box);
+  }
+  const links = el("div", "conn-links");
+  if (site) links.append(linkButton(connected ? "Get a new key" : "Get a key", site));
+  if (connected) links.append(confirmButton("x", "Disconnect", "Disconnect and restart?", () => change("remove_keys", { names: keyNames }), false));
+  edit.append(links);
+  row.append(edit);
   return row;
 }
 
-function renderKeys() {
-  // Keys you've pasted but not saved stay put while the rows' states redraw around them.
-  if ([...new FormData($("keys-form")).values()].some((v) => String(v).trim())) return;
-  $("keys-error").textContent = "";
-  $("keys-save").textContent = "Save and restart";
-  $("voice-keys").replaceChildren(
-    ...VOICE_KEYS.map((k) => keyRow(k.name, keys[k.key] ? "connected" : "missing", k.help, [[k.key, `Paste your ${k.name} key`]])),
-  );
-  const thinker = brainOf(bot(team.main));
-  $("brain-keys").replaceChildren(
-    ...providers.map((p) => {
-      const does = [p.web && "Searches the web.", p.id === "xai" && "Also gives every bot X search and Grok Imagine pictures."].filter(Boolean).join(" ");
-      if (!p.key) return keyRow(p.name, "local", `Runs models on this Mac. Install it from ${p.site}.`, []);
-      const state = p.ready ? "connected" : p === thinker ? "missing" : "optional";
-      const help = `${does} Get a key at ${p.site}.`.trim();
-      if (p.id === "custom") {
-        return keyRow(p.name, state, "Any server that speaks the OpenAI API: its address, and a key if it needs one.", [
-          ["CUSTOM_BASE_URL", "https://your-server/v1", "url"],
-          [p.key, "Its key (if it needs one)"],
-        ]);
-      }
-      return keyRow(p.name, state, help, [[p.key, `Paste your ${p.name} key`]]);
-    }),
-  );
+function voiceConn(k) {
+  const has = Boolean(keys[k.key]);
+  return connRow({ keyNames: [k.key], mono: k.mono, name: k.name, sub: k.does, state: has ? "ok" : "off", stateText: has ? "Connected" : "Not connected", site: k.site, fields: [[k.key, `Paste your ${k.name} key`]] });
 }
 
-$("keys-form").addEventListener("input", () => ($("keys-error").textContent = ""));
+function brainConn(p) {
+  const users = usersOf(p);
+  const sub = [
+    p.key ? p.model : "Runs models on this Mac",
+    p.web && "web search",
+    p.id === "xai" && "X search and pictures",
+    users.length && `${and(users)} ${users.length > 1 ? "think" : "thinks"} with it`,
+  ].filter(Boolean).join(" · ");
+  const { state, text } = brainState(p);
+  const custom = p.id === "custom";
+  const fields = !p.key ? [] : custom ? [["CUSTOM_BASE_URL", "Its address, like https://your-server/v1", "url"], [p.key, "Its key, if it needs one"]] : [[p.key, `Paste your ${p.name} key`]];
+  const keyNames = !p.key ? [] : custom ? ["CUSTOM_BASE_URL", p.key] : [p.key];
+  return connRow({ provider: p.id, keyNames, mono: MONO[p.id] || p.name.slice(0, 2), iconName: custom ? "server" : "", name: p.name, sub: sub || "Any server that speaks the OpenAI API", state, stateText: text, site: p.site || "", fields });
+}
+
+// Shows a provider's latest state in its row, without redrawing keys you're typing.
+function showState(p) {
+  const row = document.querySelector(`.conn[data-provider="${p.id}"]`);
+  if (!row) return;
+  const { state, text, detail } = brainState(p);
+  row.dataset.state = state;
+  row.querySelector(".conn-state span").textContent = text;
+  row.querySelector(".conn-state").title = detail || "";
+}
+
+// Asks each connected provider, and each one on your Mac, for its models once a session, so a
+// key that doesn't work shows up here rather than in the middle of a chat.
+function checkProviders() {
+  for (const p of providers) {
+    if (checked[p.id] || (p.key && !p.ready)) continue;
+    checked[p.id] = { state: p.key ? "ok" : "off", text: "Checking…" };
+    showState(p);
+    call.invoke("models", { provider: p.id }).then(
+      (names) => (checked[p.id] = { state: "ok", text: `${p.key ? "Connected" : "Running"} · ${names.length} model${names.length === 1 ? "" : "s"}` }),
+      (err) => (checked[p.id] = p.key ? { state: "bad", text: "Couldn't connect", detail: String(err) } : { state: "off", text: "Not running", detail: String(err) }),
+    ).then(() => {
+      showState(p);
+      renderSummary();
+    });
+  }
+}
+
+function summaryCard(iconName, title, status, state, line, action) {
+  const card = el("div", "sum");
+  card.dataset.state = state;
+  const text = el("div", "set-text");
+  const head = el("b", "", title);
+  const chip = el("span", "chip");
+  chip.append(el("i", "sdot"), status);
+  head.append(chip);
+  text.append(head, el("small", "", line));
+  card.append(tile(iconName), text);
+  if (action) card.append(button("ghost", action[0], action[1]));
+  return card;
+}
+
+// The two things that matter most, up top: can you chat, and can you talk.
+function renderSummary() {
+  const main = bot(team.main);
+  const p = brainOf(main);
+  const chat = p ? brainState(p) : { state: "needed" };
+  const ok = chat.state === "ok";
+  const chatStatus = ok ? "Ready" : !p?.key ? "Not running" : chat.state === "bad" ? "Not working" : "Needs a key";
+  const missing = VOICE_KEYS.filter((k) => !keys[k.key]);
+  const voiceLine = voiceReady ? "Deepgram listens and ElevenLabs speaks" : missing.length ? `Needs ${and(missing.map((k) => k.name))}` : "Needs a speaker or headphones";
+  $("conn-summary").replaceChildren(
+    summaryCard("bubble", "Chat", chatStatus, ok ? "ok" : chat.state === "bad" ? "bad" : "needed", main && p ? `${main.name} thinks with ${p.name}` : "Pick who Voxen talks with in Bots", !ok && p?.key ? ["Connect", () => openConnection(p.key)] : null),
+    summaryCard("mic", "Voice", voiceReady ? "Ready" : "Off", voiceReady ? "ok" : "off", voiceLine, missing.length ? ["Connect", () => openConnection(missing[0].key)] : null),
+  );
+  $("nav-keys-dot").hidden = ok;
+}
+
+const keyFields = () => [...$("keys-form").querySelectorAll(".conn-edit input")];
+
+function renderKeys() {
+  renderSummary();
+  if (keyFields().some((i) => i.value.trim())) return; // pasted keys stay while states redraw
+  $("keys-error").textContent = "";
+  $("keys-save").textContent = "Save and restart";
+  $("voice-keys").replaceChildren(...VOICE_KEYS.map(voiceConn));
+  const rank = (p) => ({ ok: 0, bad: 0, needed: 1 })[brainState(p).state] ?? 2; // working first
+  $("brain-keys").replaceChildren(...[...providers].sort((a, b) => rank(a) - rank(b)).map(brainConn));
+  filterProviders();
+  updateKeysBar();
+  checkProviders();
+}
+
+function openEditor(row) {
+  const edit = row.querySelector(".conn-edit");
+  if (!edit || !edit.hidden) return;
+  edit.hidden = false;
+  row.querySelector(".conn-toggle").textContent = "Cancel";
+  edit.querySelector("input")?.focus();
+}
+
+function closeEditor(row) {
+  const edit = row.querySelector(".conn-edit");
+  if (!edit) return;
+  edit.hidden = true;
+  edit.querySelectorAll("input").forEach((i) => (i.value = ""));
+  row.querySelector(".conn-toggle").textContent = row.dataset.verb;
+  updateKeysBar();
+}
+
+// Opens Connections at one service's key, ready to paste.
+function openConnection(key) {
+  openSettings("keys");
+  $("provider-search").value = "";
+  filterProviders();
+  const row = document.querySelector(`.conn[data-keys~="${key}"]`);
+  if (!row) return;
+  openEditor(row);
+  scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 120;
+}
+
+function filterProviders() {
+  const said = $("provider-search").value.trim();
+  const q = said.toLowerCase();
+  let shown = 0;
+  $("brain-keys").querySelectorAll(".conn").forEach((row) => {
+    row.hidden = Boolean(q) && !row.dataset.name.includes(q);
+    if (!row.hidden) shown += 1;
+  });
+  $("brain-keys").classList.toggle("none", !shown);
+  $("brain-keys").dataset.empty = `No provider called “${said}”.`;
+}
+
+// Saving only shows up once there's something to save.
+function updateKeysBar() {
+  const ready = [...$("keys-form").querySelectorAll(".conn")].filter((row) => [...row.querySelectorAll(".conn-edit input")].some((i) => i.value.trim())).length;
+  $("keys-bar").hidden = !ready;
+  $("keys-count").textContent = `${ready} ${ready > 1 ? "connections" : "connection"} ready to save. Voxen restarts to use ${ready > 1 ? "them" : "it"}.`;
+}
+
+$("provider-search").addEventListener("input", filterProviders);
+$("provider-search").addEventListener("keydown", (e) => e.key === "Enter" && e.preventDefault()); // searching isn't saving
+$("keys-form").addEventListener("input", (e) => {
+  if (e.target.id === "provider-search") return;
+  $("keys-error").textContent = "";
+  updateKeysBar();
+});
+$("keys-discard").addEventListener("click", () => {
+  document.querySelectorAll(".conn").forEach(closeEditor);
+  renderKeys();
+});
 $("keys-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const entered = Object.fromEntries(
@@ -1695,6 +1815,133 @@ $("keys-form").addEventListener("submit", async (e) => {
     $("keys-save").textContent = "Save and restart";
   }
 });
+
+// Bots
+
+function renderBots() {
+  $("bot-list").replaceChildren(
+    ...team.bots.map((b) => {
+      const main = same(b.name, team.main);
+      const name = el("b", "", b.name);
+      if (main) name.append(el("span", "tag", "Main"));
+      const actions = [iconButton("pencil", "Edit", () => openBotDialog(b))];
+      if (!main) {
+        actions.push(
+          iconButton("star", "Make main", () => change("set_main", { name: b.name })),
+          confirmButton("trash", `Remove ${b.name}`, "Remove?", () => change("remove_bot", { name: b.name })),
+        );
+      }
+      return setRow(body(b.name, hue(b.name), 40), [name, el("small", "", b.role), el("small", "", brainLabel(b))], actions);
+    }),
+  );
+}
+$("settings-new-bot").addEventListener("click", () => openBotDialog());
+
+// Rooms
+
+function renderRooms() {
+  const rows = team.groups.map((g) => {
+    const who = el("span", "mchips");
+    for (const name of g.bots) {
+      const chip = el("span", "mchip");
+      chip.style.setProperty("--c", hue(name));
+      chip.append(el("i"), name);
+      who.append(chip);
+    }
+    return setRow(groupBody(g, 40), [el("b", "", g.name), who], [
+      iconButton("pencil", "Edit", () => openGroupDialog(g)),
+      confirmButton("trash", `Remove ${g.name}`, "Remove?", () => change("remove_group", { name: g.name })),
+    ]);
+  });
+  $("room-list").replaceChildren(...(rows.length ? rows : [emptyRow("users", "No rooms yet", "Make one and your bots talk things over with you.")]));
+}
+$("settings-new-room").addEventListener("click", () => openGroupDialog());
+
+// Voice: everything it needs, ticked off
+
+function renderVoice() {
+  const has = (k) => Boolean(keys[k]);
+  const both = has("DEEPGRAM_API_KEY") && has("ELEVENLABS_API_KEY");
+  const needs = [
+    ["Listening", "Deepgram hears you", has("DEEPGRAM_API_KEY"), "DEEPGRAM_API_KEY"],
+    ["Voices", "ElevenLabs gives every bot its sound", has("ELEVENLABS_API_KEY"), "ELEVENLABS_API_KEY"],
+    ["Speaker or headphones", !both ? "Checked once both keys are in" : voiceReady ? "Found" : "None found. Plug some in, then restart Voxen.", both ? voiceReady : null, ""],
+  ];
+  const head = el("div", "head");
+  const text = el("div", "set-text");
+  text.append(el("b", "", voiceReady ? "Voice is ready" : "Voice is off"), el("small", "", voiceReady ? "Press ⌘D or the mic button to talk." : "It needs everything below."));
+  const chip = el("span", "chip");
+  chip.append(el("i", "sdot"), voiceReady ? "Ready" : "Off");
+  head.append(tile("mic"), text, chip);
+  const list = el("ul", "checks");
+  for (const [title, line, ok, key] of needs) {
+    const li = el("li");
+    li.dataset.state = ok ? "ok" : ok === false ? "needed" : "off";
+    const words = el("div", "set-text");
+    words.append(el("b", "", title), el("small", "", line));
+    li.append(icon(ok ? "check" : ok === false ? "x" : "dot", "i mark-i"), words);
+    if (ok === false && key) li.append(button("ghost", "Connect", () => openConnection(key)));
+    list.append(li);
+  }
+  const card = $("voice-state");
+  card.dataset.state = voiceReady ? "ok" : "off";
+  card.replaceChildren(head, list);
+  $("voice-start").checked = prefs.get("voice-start", "off") === "on";
+  $("voice-start").disabled = !voiceReady;
+}
+$("voice-start").addEventListener("change", (e) => prefs.set("voice-start", e.target.checked ? "on" : "off"));
+
+// Look: theme and motion go through theme.js; size is the window's own zoom.
+
+function renderLook() {
+  for (const [name, fallback] of [["theme", "system"], ["zoom", "1"]]) {
+    const value = prefs.get(name, fallback);
+    $("look-form").querySelectorAll(`input[name="${name}"]`).forEach((r) => (r.checked = r.value === value));
+  }
+  const macStill = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("motion").checked = !macStill && prefs.get("motion", "full") === "full";
+  $("motion").disabled = macStill;
+  $("motion-note").textContent = macStill ? "Reduce Motion is on in macOS, so the Orbs stay still." : "The Orbs breathe, listen and speak. Off keeps them still and stops animations.";
+}
+
+function applyZoom() {
+  const scale = Number(prefs.get("zoom", "1")) || 1;
+  if (tauri) call.invoke("zoom", { scale }).catch(() => {});
+}
+
+$("look-form").addEventListener("change", (e) => {
+  if (e.target.id === "motion") prefs.set("motion", e.target.checked ? "full" : "reduced");
+  else prefs.set(e.target.name, e.target.value);
+  if (e.target.name === "zoom") applyZoom();
+  else window.applyLook();
+});
+
+// Memory
+
+function renderMemory() {
+  const n = memory.length;
+  $("memory-count").textContent = n ? `${n} ${n === 1 ? "thing" : "things"} every bot knows` : "";
+  const rows = memory.map((fact) => setRow(icon("bookmark", "i lead"), [el("span", "fact", fact)], [iconButton("x", `Forget: ${fact}`, () => change("forget", { fact }), true)]));
+  $("memory-list").replaceChildren(...(rows.length ? rows : [emptyRow("bookmark", "Nothing yet", "Tell any bot “Remember I'm vegetarian”, or add it above.")]));
+  $("memory-forget-all").replaceChildren(...(n > 1 ? [confirmButton("trash", "Forget everything", "Forget all of it?", () => change("forget", { fact: null }), false)] : []));
+}
+
+$("memory-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const fact = $("memory-input").value.trim();
+  if (!fact) return;
+  change("remember", { fact });
+  $("memory-input").value = "";
+});
+
+// Privacy & data, and About
+
+$("open-data").addEventListener("click", () => change("open_data", {}));
+
+function renderAbout() {
+  $("about-version").textContent = version ? `Version ${version}` : "";
+  $("about-mark").replaceChildren(voiceprint("voxen", ink(), 56, false, true));
+}
 
 $("settings-btn").addEventListener("click", () => openSettings());
 $("new-bot").addEventListener("click", () => openBotDialog());
