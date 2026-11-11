@@ -110,7 +110,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             status, open, send, attach, stop, clear, voice, add_bot, update_bot, set_main,
             remove_bot, add_group, update_group, remove_group, voices, models, save_keys, open_link,
-            zoom, remember, forget, open_data
+            zoom, remember, forget, open_data, remove_keys
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
@@ -353,7 +353,44 @@ fn save_keys(
     let current = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = merge_env(&current, &keys)?;
     write_private(&path, &updated).map_err(|e| format!("Couldn't save the keys: {e}"))?;
-    app.restart()
+    restart_without(&app, keys.keys())
+}
+
+/// Takes keys out of `.env` and restarts without them, so Voxen stops using those services.
+#[tauri::command]
+fn remove_keys(names: Vec<String>, app: tauri::AppHandle, state: State<'_, CallState>) -> Result<(), String> {
+    let known = key_names();
+    if let Some(unknown) = names.iter().find(|n| !known.contains(&n.as_str())) {
+        return Err(format!("{unknown} isn't a key Voxen uses."));
+    }
+    let path = state.root.join(".env");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    write_private(&path, &drop_env(&current, &names)).map_err(|e| format!("Couldn't save the keys: {e}"))?;
+    restart_without(&app, &names)
+}
+
+/// Starts Voxen again and quits this one. This one loaded `.env` into its environment when it
+/// started, and a restart inherits that, so the keys just changed are left out: the new Voxen
+/// reads them fresh from `.env`, or not at all once they're removed.
+fn restart_without<'a>(app: &tauri::AppHandle, names: impl IntoIterator<Item = &'a String>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Couldn't restart Voxen: {e}"))?;
+    let mut again = std::process::Command::new(exe);
+    again.args(std::env::args_os().skip(1));
+    for name in names {
+        again.env_remove(name);
+    }
+    again.spawn().map_err(|e| format!("Couldn't restart Voxen: {e}"))?;
+    app.exit(0);
+    Ok(())
+}
+
+/// The `.env` text without the lines that set `names`.
+fn drop_env(current: &str, names: &[String]) -> String {
+    let kept: Vec<&str> = current
+        .lines()
+        .filter(|line| !names.iter().any(|n| line.trim_start().starts_with(&format!("{n}="))))
+        .collect();
+    kept.join("\n") + "\n"
 }
 
 /// Puts each key into the `.env` text, replacing its line or adding one. Empty values are skipped.
@@ -422,6 +459,14 @@ mod tests {
             merged,
             "# my keys\nANTHROPIC_API_KEY=new\n# CLAUDE_MODEL=claude-opus-5-5\nDEEPGRAM_API_KEY=dg\n"
         );
+    }
+
+    #[test]
+    fn removed_keys_lose_only_their_lines() {
+        let current = "# my keys\nANTHROPIC_API_KEY=a\nOPENAI_API_KEY=o\n  CUSTOM_BASE_URL=http://x\n";
+        let names = ["OPENAI_API_KEY".to_string(), "CUSTOM_BASE_URL".to_string()];
+        assert_eq!(drop_env(current, &names), "# my keys\nANTHROPIC_API_KEY=a\n");
+        assert_eq!(drop_env("", &names), "\n");
     }
 
     #[test]

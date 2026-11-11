@@ -21,6 +21,11 @@ What changed in each Voxen release, newest first.
 - No setup dialog on first run. The empty room says what's missing, and its button opens
   Settings at Keys.
 
+### Fixed
+
+- A key you replace in Settings now takes effect after Save and restart. Before, Voxen kept
+  using the old one until you quit it.
+
 ## [0.1.0] - 2026-11-10
 
 The first public release.
