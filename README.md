@@ -100,4 +100,5 @@ in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The company logos in Settings come from
+[LobeHub Icons](https://github.com/lobehub/lobe-icons) (MIT); the marks belong to their companies.

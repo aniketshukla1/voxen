@@ -1583,10 +1583,17 @@ function emptyRow(iconName, title, line) {
 
 const VOICE_KEYS = [
   { key: "DEEPGRAM_API_KEY", name: "Deepgram", mono: "Dg", does: "Hears you when you talk", site: "console.deepgram.com" },
-  { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", mono: "11", does: "Gives every bot its voice", site: "elevenlabs.io" },
+  { key: "ELEVENLABS_API_KEY", name: "ElevenLabs", logo: "elevenlabs", does: "Gives every bot its voice", site: "elevenlabs.io" },
 ];
-// Each provider's two-letter mark; the brands' own logos aren't ours to use.
-const MONO = { anthropic: "Cl", openai: "Oa", google: "Ge", xai: "xA", mistral: "Mi", deepseek: "Ds", perplexity: "Px", openrouter: "Or", groq: "Gq", together: "To", fireworks: "Fw", cerebras: "Ce", moonshot: "Ki", qwen: "Qw", ollama: "Ol", lmstudio: "LM" };
+// Each provider's logo in the sprite (one colour, from LobeHub Icons; the marks are theirs).
+const LOGO = { anthropic: "claude", openai: "openai", google: "gemini", xai: "xai", mistral: "mistral", deepseek: "deepseek", perplexity: "perplexity", openrouter: "openrouter", groq: "groq", together: "together", fireworks: "fireworks", cerebras: "cerebras", moonshot: "kimi", qwen: "qwen", ollama: "ollama", lmstudio: "lmstudio" };
+
+// A company's logo from the sprite.
+function logo(name) {
+  const svg = icon(name, "logo");
+  svg.firstChild.setAttribute("href", `#logo-${name}`);
+  return svg;
+}
 const checked = {}; // provider → what asking it for its models found, once per session
 
 const usersOf = (p) => team.bots.filter((b) => (b.provider || "anthropic") === p.id).map((b) => b.name);
@@ -1601,11 +1608,12 @@ function brainState(p) {
 }
 
 // One service: its mark, what it does and for whom, whether it works, and where its key goes.
-function connRow({ provider = "", keyNames, mono, iconName, name, sub, state, stateText, site, fields }) {
+function connRow({ provider = "", keyNames, mono = "", logo: mark, iconName, name, sub, state, stateText, site, fields }) {
   const row = el("li", "conn");
   Object.assign(row.dataset, { provider, state, keys: keyNames.join(" "), name: name.toLowerCase() });
-  const badge = el("span", "mono", iconName ? "" : mono);
-  if (iconName) badge.append(icon(iconName));
+  const badge = el("span", "mono", mark || iconName ? "" : mono);
+  if (mark) badge.append(logo(mark));
+  else if (iconName) badge.append(icon(iconName));
   const text = el("div", "set-text");
   text.append(el("b", "", name), el("small", "", sub));
   const status = el("span", "conn-state");
@@ -1650,7 +1658,7 @@ function connRow({ provider = "", keyNames, mono, iconName, name, sub, state, st
 
 function voiceConn(k) {
   const has = Boolean(keys[k.key]);
-  return connRow({ keyNames: [k.key], mono: k.mono, name: k.name, sub: k.does, state: has ? "ok" : "off", stateText: has ? "Connected" : "Not connected", site: k.site, fields: [[k.key, `Paste your ${k.name} key`]] });
+  return connRow({ keyNames: [k.key], mono: k.mono, logo: k.logo, name: k.name, sub: k.does, state: has ? "ok" : "off", stateText: has ? "Connected" : "Not connected", site: k.site, fields: [[k.key, `Paste your ${k.name} key`]] });
 }
 
 function brainConn(p) {
@@ -1665,7 +1673,7 @@ function brainConn(p) {
   const custom = p.id === "custom";
   const fields = !p.key ? [] : custom ? [["CUSTOM_BASE_URL", "Its address, like https://your-server/v1", "url"], [p.key, "Its key, if it needs one"]] : [[p.key, `Paste your ${p.name} key`]];
   const keyNames = !p.key ? [] : custom ? ["CUSTOM_BASE_URL", p.key] : [p.key];
-  return connRow({ provider: p.id, keyNames, mono: MONO[p.id] || p.name.slice(0, 2), iconName: custom ? "server" : "", name: p.name, sub: sub || "Any server that speaks the OpenAI API", state, stateText: text, site: p.site || "", fields });
+  return connRow({ provider: p.id, keyNames, mono: p.name.slice(0, 2), logo: LOGO[p.id], iconName: custom ? "server" : "", name: p.name, sub: sub || "Any server that speaks the OpenAI API", state, stateText: text, site: p.site || "", fields });
 }
 
 // Shows a provider's latest state in its row, without redrawing keys you're typing.

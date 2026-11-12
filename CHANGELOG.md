@@ -15,6 +15,7 @@ What changed in each Voxen release, newest first.
 - Settings › Memory: see what every bot knows about you, add to it, or forget things.
 - Settings › Privacy & data, Shortcuts and About: where everything is kept (with Show in
   Finder), what leaves your Mac, every shortcut, and the version with its links.
+- Company logos in Connections, in one colour to match Voxen's black and white.
 
 ### Changed
 

@@ -428,6 +428,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .tile.big .i { width: 22px; height: 22px; }
 .mono { flex-shrink: 0; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); font: 600 12px/1 var(--display); letter-spacing: -0.02em; }
 .mono .i { width: 17px; height: 17px; }
+/* Company logos are filled shapes in the text colour, so they stay black and white */
+.logo { width: 19px; height: 19px; fill: currentColor; stroke: none; }
 .lead { color: var(--text-3); }
 /* Status dots: green works, amber is needed, red failed, grey is off */
 .sdot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--text-3); }
