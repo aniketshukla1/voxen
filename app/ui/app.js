@@ -584,9 +584,9 @@ const brainLabel = (b) => {
 
 function renderSetup() {
   const chat = Boolean(brainOf(bot(team.main))?.ready);
-  const missing = [chat, keys.DEEPGRAM_API_KEY, keys.ELEVENLABS_API_KEY].filter((ok) => !ok).length;
+  const missing = [chat, keys.DEEPGRAM_API_KEY, keys.ELEVENLABS_API_KEY || localVoices.length].filter((ok) => !ok).length;
   $("settings-btn").classList.toggle("ok", missing === 0);
-  $("settings-sub").textContent = missing === 0 ? "Keys, bots and the look" : chat ? `Add ${missing} voice key${missing > 1 ? "s" : ""}` : "Add your keys";
+  $("settings-sub").textContent = missing === 0 ? "Keys, bots and the look" : chat ? "Set up voice" : "Add your keys";
 }
 
 // The cast
@@ -1271,17 +1271,40 @@ $("provider-select").addEventListener("change", () => loadModels(""));
 async function loadVoices(selected) {
   const fill = (voices) => {
     const list = selected && !voices.some((v) => v.id === selected) ? [...voices, { id: selected, name: "Its current voice" }] : voices;
-    $("voice-select").replaceChildren(...list.map((v) => Object.assign(el("option"), { value: v.id, textContent: v.name })));
+    // ElevenLabs' voices, then each voice model's on this Mac.
+    const groups = new Map();
+    for (const v of list) {
+      const model = v.id.startsWith("ollama/") ? v.id.split("/")[1] : "";
+      const label = model ? `On this Mac (${model})` : "ElevenLabs";
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(Object.assign(el("option"), { value: v.id, textContent: v.name }));
+    }
+    $("voice-select").replaceChildren(
+      ...[...groups].map(([label, options]) => {
+        const group = Object.assign(el("optgroup"), { label });
+        group.append(...options);
+        return group;
+      }),
+    );
     if (selected) $("voice-select").value = selected;
+    syncSpeed();
   };
   fill(FALLBACK_VOICES);
   try {
     const listed = await call.invoke("voices");
     if (listed?.length) fill(listed);
   } catch {
-    // no ElevenLabs key yet: the default voices stay
+    // no voices to list yet: the default ones stay
   }
 }
+
+// Voices on this Mac speak at one speed.
+function syncSpeed() {
+  const local = $("voice-select").value.startsWith("ollama/");
+  botField("speed").disabled = local;
+  botField("speed").title = local ? "Voices on this Mac speak at one speed." : "";
+}
+$("voice-select").addEventListener("change", syncSpeed);
 
 function useTemplate(t) {
   if (!taken(t.name)) botField("name").value = t.name;
@@ -1454,6 +1477,7 @@ const panes = {
 };
 let memory = []; // what the bots remember about you
 let version = "";
+let localVoices = []; // the voice models pulled into Ollama on this Mac
 let pane = "keys";
 const inSettings = () => !settings.hidden;
 
@@ -1588,6 +1612,14 @@ const VOICE_KEYS = [
 // Each provider's logo in the sprite (one colour, from LobeHub Icons; the marks are theirs).
 const LOGO = { anthropic: "claude", openai: "openai", google: "gemini", xai: "xai", mistral: "mistral", deepseek: "deepseek", perplexity: "perplexity", openrouter: "openrouter", groq: "groq", together: "together", fireworks: "fireworks", cerebras: "cerebras", moonshot: "kimi", qwen: "qwen", ollama: "ollama", lmstudio: "lmstudio" };
 
+// What voice still needs: Deepgram to listen, and ElevenLabs or a voice in Ollama to speak.
+function voiceGaps() {
+  return [!keys.DEEPGRAM_API_KEY && VOICE_KEYS[0], !(keys.ELEVENLABS_API_KEY || localVoices.length) && VOICE_KEYS[1]].filter(Boolean);
+}
+
+// Who gives the bots their voices.
+const speakers = () => [keys.ELEVENLABS_API_KEY && "ElevenLabs", localVoices.length && "Ollama"].filter(Boolean);
+
 // A company's logo from the sprite.
 function logo(name) {
   const svg = icon(name, "logo");
@@ -1661,6 +1693,13 @@ function voiceConn(k) {
   return connRow({ keyNames: [k.key], mono: k.mono, logo: k.logo, name: k.name, sub: k.does, state: has ? "ok" : "off", stateText: has ? "Connected" : "Not connected", site: k.site, fields: [[k.key, `Paste your ${k.name} key`]] });
 }
 
+// Voices that run in Ollama on this Mac: no key, just a model pulled in.
+function localVoicesConn() {
+  const ok = localVoices.length > 0;
+  const sub = ok ? `${and(localVoices)} on this Mac, no key needed` : "Voices that run on this Mac. Pull one in Terminal: ollama pull phonon";
+  return connRow({ keyNames: [], logo: "ollama", name: "Ollama voices", sub, state: ok ? "ok" : "off", stateText: ok ? "On this Mac" : "Not pulled yet", site: ok ? "" : "ollama.com/library/phonon", fields: [] });
+}
+
 function brainConn(p) {
   const users = usersOf(p);
   const sub = [
@@ -1724,8 +1763,13 @@ function renderSummary() {
   const chat = p ? brainState(p) : { state: "needed" };
   const ok = chat.state === "ok";
   const chatStatus = ok ? "Ready" : !p?.key ? "Not running" : chat.state === "bad" ? "Not working" : "Needs a key";
-  const missing = VOICE_KEYS.filter((k) => !keys[k.key]);
-  const voiceLine = voiceReady ? "Deepgram listens and ElevenLabs speaks" : missing.length ? `Needs ${and(missing.map((k) => k.name))}` : "Needs a speaker or headphones";
+  const missing = voiceGaps();
+  const speaks = speakers();
+  const voiceLine = voiceReady
+    ? `Deepgram listens and ${and(speaks)} ${speaks.length > 1 ? "speak" : "speaks"}`
+    : missing.length
+      ? `Needs ${and(missing.map((k) => (k.key === "ELEVENLABS_API_KEY" ? "a voice" : k.name)))}`
+      : "Needs a speaker or headphones";
   $("conn-summary").replaceChildren(
     summaryCard("bubble", "Chat", chatStatus, ok ? "ok" : chat.state === "bad" ? "bad" : "needed", main && p ? `${main.name} thinks with ${p.name}` : "Pick who Voxen talks with in Bots", !ok && p?.key ? ["Connect", () => openConnection(p.key)] : null),
     summaryCard("mic", "Voice", voiceReady ? "Ready" : "Off", voiceReady ? "ok" : "off", voiceLine, missing.length ? ["Connect", () => openConnection(missing[0].key)] : null),
@@ -1740,7 +1784,7 @@ function renderKeys() {
   if (keyFields().some((i) => i.value.trim())) return; // pasted keys stay while states redraw
   $("keys-error").textContent = "";
   $("keys-save").textContent = "Save and restart";
-  $("voice-keys").replaceChildren(...VOICE_KEYS.map(voiceConn));
+  $("voice-keys").replaceChildren(...VOICE_KEYS.map(voiceConn), localVoicesConn());
   const rank = (p) => ({ ok: 0, bad: 0, needed: 1 })[brainState(p).state] ?? 2; // working first
   $("brain-keys").replaceChildren(...[...providers].sort((a, b) => rank(a) - rank(b)).map(brainConn));
   filterProviders();
@@ -1869,11 +1913,12 @@ $("settings-new-room").addEventListener("click", () => openGroupDialog());
 
 function renderVoice() {
   const has = (k) => Boolean(keys[k]);
-  const both = has("DEEPGRAM_API_KEY") && has("ELEVENLABS_API_KEY");
+  const speaks = speakers();
+  const both = has("DEEPGRAM_API_KEY") && speaks.length > 0;
   const needs = [
     ["Listening", "Deepgram hears you", has("DEEPGRAM_API_KEY"), "DEEPGRAM_API_KEY"],
-    ["Voices", "ElevenLabs gives every bot its sound", has("ELEVENLABS_API_KEY"), "ELEVENLABS_API_KEY"],
-    ["Speaker or headphones", !both ? "Checked once both keys are in" : voiceReady ? "Found" : "None found. Plug some in, then restart Voxen.", both ? voiceReady : null, ""],
+    ["Voices", speaks.length ? `${and(speaks)} ${speaks.length > 1 ? "give" : "gives"} every bot its sound` : "ElevenLabs, or a voice model in Ollama on this Mac", speaks.length > 0, "ELEVENLABS_API_KEY"],
+    ["Speaker or headphones", !both ? "Checked once the rest is in" : voiceReady ? "Found" : "None found. Plug some in, then restart Voxen.", both ? voiceReady : null, ""],
   ];
   const head = el("div", "head");
   const text = el("div", "set-text");
@@ -1991,6 +2036,7 @@ async function start() {
   providers = status.providers;
   voiceReady = status.voice;
   memory = status.memory || [];
+  localVoices = status.local_voices || [];
   version = status.version || "";
   paintMarks();
   renderRail();

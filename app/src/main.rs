@@ -45,6 +45,8 @@ struct Status {
     groups: Vec<Group>,
     /// What the bots remember about you, for Settings.
     memory: Vec<String>,
+    /// The voice models pulled into Ollama on this Mac, like "phonon".
+    local_voices: Vec<String>,
     /// This build of Voxen.
     version: &'static str,
 }
@@ -147,6 +149,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
                     bots: Vec::new(),
                     groups: Vec::new(),
                     memory: Vec::new(),
+                    local_voices: Vec::new(),
                     version: env!("CARGO_PKG_VERSION"),
                 },
             );
@@ -162,6 +165,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         bots: team.bots.clone(),
         groups: team.groups.clone(),
         memory: Memory::load(Some(root.join("data").join("memory.md"))).facts,
+        local_voices: Vec::new(),
         version: env!("CARGO_PKG_VERSION"),
     };
     let thinker = team.main_bot().provider.clone();
@@ -171,10 +175,15 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         status.problem = Some(format!("Add your {name} key in Settings to start chatting."));
     }
     let names = team.names();
-    let voices = Voices::from_env().ok();
-    let speaker = voices.as_ref().and_then(|_| audio::speaker().ok());
+    // Bots speak through ElevenLabs, or through a voice model pulled into Ollama on this Mac.
+    let voices = Voices::from_env();
+    status.local_voices = voices.local_models().await;
+    let speaker = (voices.eleven() || !status.local_voices.is_empty())
+        .then(|| audio::speaker().ok())
+        .flatten();
     status.voice = speaker.is_some() && key_set(DEEPGRAM);
-    let (commands, mut updates) = call::start(team, brains, voices, speaker, Xai::from_env().ok());
+    let speaking = speaker.is_some().then(|| voices.clone());
+    let (commands, mut updates) = call::start(team, brains, speaking, speaker, Xai::from_env().ok());
     tauri::async_runtime::spawn(async move {
         while let Some(update) = updates.recv().await {
             app.emit("call", update).ok();
@@ -185,7 +194,7 @@ async fn connect(app: tauri::AppHandle, root: &Path) -> CallState {
         status,
         commands: Some(commands),
         names,
-        voices: Voices::from_env().ok(),
+        voices: Some(voices),
         mic: Mutex::new(None),
     }
 }
@@ -317,7 +326,7 @@ async fn voices(state: State<'_, CallState>) -> Result<Vec<VoiceOption>, String>
     let voices = state
         .voices
         .as_ref()
-        .ok_or("Add your ElevenLabs key in Settings to choose from your voices.")?;
+        .ok_or("Add your ElevenLabs key, or pull a voice with Ollama, in Settings to choose from your voices.")?;
     let list = voices.list().await.map_err(|e| format!("{e:#}"))?;
     Ok(list
         .into_iter()
@@ -329,7 +338,7 @@ async fn voices(state: State<'_, CallState>) -> Result<Vec<VoiceOption>, String>
 #[tauri::command]
 async fn voice(on: bool, state: State<'_, CallState>) -> Result<(), String> {
     if on && !state.status.voice {
-        return Err("Voice needs your Deepgram and ElevenLabs keys. Add them in Settings.".into());
+        return Err("Voice needs your Deepgram key, and ElevenLabs or a voice model in Ollama to speak with. See Settings › Voice.".into());
     }
     let mic = if on {
         let key = std::env::var(DEEPGRAM).map_err(|e| e.to_string())?;

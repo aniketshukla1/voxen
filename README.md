@@ -41,7 +41,7 @@ tools (`xcode-select --install`) and an API key for at least one AI provider.
 |---|---|---|
 | Thinking (typing and voice) | One AI provider. Maya starts on Claude; click her to pick another. | [console.anthropic.com](https://console.anthropic.com) → API keys |
 | Listening (voice) | Deepgram | [console.deepgram.com](https://console.deepgram.com) → API keys |
-| Voices (voice) | ElevenLabs | [elevenlabs.io](https://elevenlabs.io) → Developers → API keys |
+| Voices (voice) | ElevenLabs, or Ollama's voices on this Mac with no key | [elevenlabs.io](https://elevenlabs.io) → Developers → API keys, or see [Run bots on your Mac](#run-bots-on-your-mac) |
 | X search and pictures (optional) | xAI | [console.x.ai](https://console.x.ai) → API keys |
 
 You can also copy `.env.example` to `.env` and paste the keys there by hand. To check each key
@@ -64,6 +64,18 @@ OpenAI-compatible server. Pick it when you make a bot, or click a bot (or Change
 switch it any time; the model list loads live from the provider. Add the provider's key in
 Setup first. Web search works with Claude, OpenAI, Gemini, Grok and Perplexity; memory and
 reminders work with every provider except Perplexity.
+
+## Run bots on your Mac
+
+With [Ollama](https://ollama.com) 0.40.11 or newer, a bot can think and speak without any key:
+
+```bash
+ollama pull gemma4:e4b-it-qat   # a chat model that uses Voxen's tools, 6.1 GB
+ollama pull phonon              # 38 voices, 112 MB
+```
+
+Then in Settings › Bots, edit a bot: pick Ollama under "Thinks with", and a voice under "On this
+Mac". Voxen lists only the Ollama models that can chat. Listening still uses Deepgram.
 
 ## What the bots can do
 

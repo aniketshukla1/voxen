@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     let (commands, mut updates) = call::start(
         team,
         Brains::new(),
-        Some(Voices::from_env()?),
+        Some(Voices::from_env()),
         Some(audio::speaker()?),
         Xai::from_env().ok(),
     );

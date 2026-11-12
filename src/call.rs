@@ -1130,9 +1130,12 @@ bots = ["Maya", "Sam"]
     /// Runs one typed turn in the main chat against the real API and returns its updates.
     async fn live_turn(said: &str) -> Vec<Update> {
         dotenvy::dotenv().ok();
-        let brains = Brains::new();
-        assert!(brains.ready("anthropic"), "put ANTHROPIC_API_KEY in .env (Settings in the app does it)");
-        let (commands, mut updates) = start(Team::parse(TEAM).unwrap(), brains, None, None, None);
+        assert!(Brains::new().ready("anthropic"), "put ANTHROPIC_API_KEY in .env (Settings in the app does it)");
+        live_turn_with(TEAM, said).await
+    }
+
+    async fn live_turn_with(team: &str, said: &str) -> Vec<Update> {
+        let (commands, mut updates) = start(Team::parse(team).unwrap(), Brains::new(), None, None, None);
         commands.send(Command::Typed(said.into())).unwrap();
         let mut got = Vec::new();
         // Done comes before any problem with the reply, so wait a moment past it.
@@ -1167,6 +1170,19 @@ bots = ["Maya", "Sam"]
             "{got:#?}"
         );
         // The reply carries on after the tool runs.
+        assert!(got.iter().any(|u| matches!(u, Update::Text { .. })), "{got:#?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Ollama running with a chat model (ollama pull gemma4:e4b-it-qat)"]
+    async fn live_model_on_this_mac_replies_and_runs_our_tools() {
+        let local = TEAM.replacen("voice = \"v1\"", "voice = \"v1\"\nprovider = \"ollama\"\nmodel = \"gemma4:e4b-it-qat\"", 1);
+        let got = live_turn_with(&local, "Please remember that my favourite colour is teal.").await;
+        assert!(!got.iter().any(|u| matches!(u, Update::Problem { .. })), "{got:#?}");
+        assert!(
+            got.iter().any(|u| matches!(u, Update::Step { text, .. } if text.starts_with("Remembering"))),
+            "{got:#?}"
+        );
         assert!(got.iter().any(|u| matches!(u, Update::Text { .. })), "{got:#?}");
     }
 }

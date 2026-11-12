@@ -444,6 +444,20 @@ impl Llm {
 
     /// The models this provider offers right now.
     pub async fn models(&self) -> Result<Vec<String>> {
+        if self.provider.id == "ollama" {
+            // Ollama's own listing says what each model can do, so speech models stay out.
+            let url = format!("{}/api/tags", self.base.trim_end_matches("/v1"));
+            let tags: Value = self
+                .http
+                .get(&url)
+                .send()
+                .await
+                .context("asking Ollama on this Mac for its models")?
+                .error_for_status()?
+                .json()
+                .await?;
+            return Ok(ollama_models(&tags, "completion"));
+        }
         let (url, request) = match self.provider.wire {
             Anthropic => {
                 let url = format!("{}/v1/models?limit=100", self.base);
@@ -471,6 +485,25 @@ impl Llm {
             .await?;
         Ok(model_names(self.provider, &reply))
     }
+}
+
+/// Where Ollama on this Mac listens, without the `/v1` its OpenAI-style API adds.
+pub fn ollama_root() -> String {
+    find("ollama").map(base_of).unwrap_or_default().trim_end_matches("/v1").to_string()
+}
+
+/// The models pulled into Ollama that can do `capability` ("completion" to chat, "speech" to
+/// talk), from its `/api/tags` listing. A model that doesn't say what it can do is kept.
+pub fn ollama_models(tags: &Value, capability: &str) -> Vec<String> {
+    let mut names: Vec<String> = tags["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["capabilities"].as_array().is_none_or(|can| can.iter().any(|c| c == capability)))
+        .filter_map(|m| m["name"].as_str().map(|n| n.trim_end_matches(":latest").to_string()))
+        .collect();
+    names.sort();
+    names
 }
 
 /// Model ids from a models listing, without the ones that can't chat.
@@ -826,6 +859,18 @@ mod tests {
 
     fn llm(id: &str) -> Llm {
         Brains::offline().llm(id, "").unwrap()
+    }
+
+    #[test]
+    fn ollama_lists_models_by_what_they_can_do() {
+        let tags = json!({"models": [
+            {"name": "phonon:latest", "capabilities": ["speech"]},
+            {"name": "gemma4:e4b-it-qat", "capabilities": ["completion", "vision", "audio", "tools", "thinking"]},
+            {"name": "llama3.2:latest"},
+        ]});
+        assert_eq!(ollama_models(&tags, "completion"), ["gemma4:e4b-it-qat", "llama3.2"]);
+        assert_eq!(ollama_models(&tags, "speech"), ["llama3.2", "phonon"]);
+        assert!(ollama_models(&json!({}), "speech").is_empty());
     }
 
     #[test]
