@@ -262,6 +262,12 @@ canvas.print { display: block; }
 .stage.enter :is(.scripts, .welcome) { animation: enter 0.5s var(--ease) 0.06s backwards; }
 .note { max-width: 560px; margin: 0; color: var(--warn); font-size: 13px; }
 .note:empty { display: none; }
+/* The way forward when the main bot can't think yet: one click to Ollama, or add a key */
+.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ctas:not(:has(button:not([hidden]))) { display: none; }
+.solid.with-icon { display: inline-flex; align-items: center; gap: 8px; }
+.with-icon .logo { width: 16px; height: 16px; }
+.notice .use-local { margin-left: 10px; height: 28px; vertical-align: middle; }
 
 /* Dock */
 .dock { display: flex; align-items: center; gap: 14px; width: calc(100% - 64px); max-width: 920px; margin: 0 auto; padding: 10px 0 6px; }

@@ -65,6 +65,8 @@ let tray = []; // files waiting to go with your next turn
 let providers = []; // every provider a bot can think with, and whether its key is in
 let editing = null; // the bot being changed in the voice dialog, or null for a new one
 let savingBot = null; // the voice dialog's save, until the conversations confirm or refuse it
+let lastSaid = ""; // your last typed turn, asked again once a fix lets the bot answer
+let localChat = []; // the chat models pulled into Ollama on this Mac
 let pendingOpen = null; // a room to open once its new voice or room shows up
 let hearing = null; // what you're saying, before your turn ends
 let demo = []; // timers of a running demo
@@ -590,6 +592,43 @@ function renderSetup() {
   $("settings-sub").textContent = missing === 0 ? "Keys, bots and the look" : chat ? "Set up voice" : "Add your keys";
 }
 
+// The empty room's way forward when the main bot can't think: add a key, or, with a chat
+// model in Ollama, one click to think on this Mac.
+function renderCta() {
+  const thinks = Boolean(brainOf(bot(team.main))?.ready);
+  const local = !thinks && localChat.length > 0;
+  $("setup-cta").hidden = !tauri || thinks;
+  $("setup-cta").className = local ? "ghost big" : "solid";
+  $("local-cta").hidden = !tauri || !local;
+  if (thinks && /key in Settings/.test($("note").textContent)) $("note").textContent = "";
+}
+
+// Every bot that can't think yet (its provider has no key) moves onto Ollama's first chat
+// model, and onto a voice from Ollama too when ElevenLabs isn't set up.
+async function useLocal() {
+  const listed = !keys.ELEVENLABS_API_KEY && localVoices.length ? await call.invoke("voices").catch(() => []) : [];
+  const voices = ["Zoey", "Easton", "Freya", "Hadley", "Harper", "Hugh"]
+    .map((name) => listed.find((v) => v.name === name && v.id.startsWith("ollama/")))
+    .filter(Boolean);
+  let next = 0;
+  for (const b of team.bots.filter((x) => !brainOf(x)?.ready)) {
+    const voice = voices.length && !b.voice.startsWith("ollama/") ? voices[next++ % voices.length].id : b.voice;
+    await call.invoke("update_bot", { bot: { ...b, provider: "ollama", model: localChat[0], voice } });
+  }
+}
+
+// "Use Ollama on this Mac", on a bot's error: switches, then asks your question again.
+function localButton() {
+  const b = button("ghost with-icon use-local", "", async () => {
+    document.querySelectorAll(".use-local").forEach((other) => (other.disabled = true));
+    await useLocal();
+    b.replaceChildren(`Now on ${localChat[0]}`);
+    if (lastSaid) send(lastSaid);
+  });
+  b.append(logo("ollama"), "Use Ollama on this Mac");
+  return b;
+}
+
 // The cast
 
 function renderCast() {
@@ -758,9 +797,14 @@ function speak(said, text) {
   }
 }
 
-function note(room, text) {
+// A problem in a room, with a button that fixes it when there is one.
+function note(room, text, action) {
   if (room === open && stage.classList.contains("quiet")) $("note").textContent = text;
-  else addLine(room, el("p", "notice", text)).classList.remove("now");
+  else {
+    const line = el("p", "notice", text);
+    if (action) line.append(action);
+    addLine(room, line).classList.remove("now");
+  }
 }
 
 function clearHearing() {
@@ -822,6 +866,7 @@ async function openRoom(room) {
 
 async function send(text) {
   stopDemo();
+  lastSaid = text;
   try {
     await call.invoke("send", { text });
   } catch (err) {
@@ -843,6 +888,7 @@ function onUpdate(u) {
       renderRail();
       renderHeader();
       renderSetup();
+      renderCta();
       refreshSettings();
       // A room that's gone falls back to the main chat, which shows a new main bot at once.
       if (!exists(open)) openRoom("main");
@@ -952,7 +998,8 @@ function onUpdate(u) {
         pendingOpen = null;
         break;
       }
-      note(room, u.text);
+      // A bot that can't think for want of a key can think with Ollama instead, in one click.
+      note(room, u.text, localChat.length && /add your .+ key in Settings/.test(u.text) ? localButton() : null);
       if (inSettings()) $("settings-note").textContent = u.text;
       break;
   }
@@ -1541,6 +1588,11 @@ $("set-nav").addEventListener("click", (e) => {
 });
 $("settings-done").addEventListener("click", closeSettings);
 $("setup-cta").addEventListener("click", () => openSettings("keys"));
+$("local-cta").addEventListener("click", async (e) => {
+  e.currentTarget.disabled = true;
+  await useLocal();
+  e.currentTarget.disabled = false;
+});
 
 // A line icon from the sprite in index.html.
 function icon(name, className = "i") {
@@ -2072,7 +2124,11 @@ async function start() {
   await openRoom(team.groups.length && !status.chat ? `group:${team.groups[0].name}` : "main");
   $("note").textContent = status.problem || "";
   // No pop-up on first run: the empty room says what's missing and offers the way to add it.
-  $("setup-cta").hidden = !(tauri && !status.chat);
+  renderCta();
+  // Ollama's chat models, for the one click that lets bots think on this Mac.
+  if (tauri && providers.some((p) => p.id === "ollama" && p.ready)) {
+    call.invoke("models", { provider: "ollama" }).then((names) => ((localChat = names || []), renderCta()), () => {});
+  }
   applyZoom();
   if (voiceReady && prefs.get("voice-start", "off") === "on") setVoice(true);
 }

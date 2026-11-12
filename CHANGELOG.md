@@ -16,6 +16,10 @@ What changed in each Voxen release, newest first.
 - Settings › Privacy & data, Shortcuts and About: where everything is kept (with Show in
   Finder), what leaves your Mac, every shortcut, and the version with its links.
 - Company logos in Connections, in one colour to match Voxen's black and white.
+- One click to think on your Mac. When a bot can't answer for want of a key and Ollama has
+  a chat model, its error (and the empty room) offers "Use Ollama on this Mac". That moves
+  the bots without a key onto it, with Ollama voices when there's no ElevenLabs, and asks
+  your question again.
 - Bots can speak with voices that run on your Mac. Pull Phonon into Ollama
   (`ollama pull phonon`) and give any bot one of its 38 voices, with no key. Voice works with
   Ollama's voices, ElevenLabs, or both.
