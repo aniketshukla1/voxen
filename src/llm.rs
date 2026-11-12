@@ -73,7 +73,7 @@ pub const PROVIDERS: &[Provider] = &[
     provider("cerebras", "Cerebras", Chat, "https://api.cerebras.ai/v1", Some("CEREBRAS_API_KEY"), "gpt-oss-120b", false, true, "cloud.cerebras.ai"),
     provider("moonshot", "Moonshot Kimi", Chat, "https://api.moonshot.ai/v1", Some("MOONSHOT_API_KEY"), "kimi-k3", false, true, "platform.moonshot.ai"),
     provider("qwen", "Alibaba Qwen", Chat, "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", Some("DASHSCOPE_API_KEY"), "qwen-max-latest", false, true, "dashscope.console.aliyun.com"),
-    provider("ollama", "Ollama (on this Mac)", Chat, "http://localhost:11434/v1", None, "llama3.2", false, true, "ollama.com"),
+    provider("ollama", "Ollama (on this Mac)", Chat, "http://localhost:11434/v1", None, "", false, true, "ollama.com"),
     provider("lmstudio", "LM Studio (on this Mac)", Chat, "http://localhost:1234/v1", None, "", false, true, "lmstudio.ai"),
     provider("custom", "Other (OpenAI-compatible)", Chat, "", Some("CUSTOM_API_KEY"), "", false, true, "your provider's docs"),
 ];
@@ -134,7 +134,8 @@ impl Brains {
     pub fn llm(&self, provider: &str, model: &str) -> Result<Llm> {
         let provider = find(provider).with_context(|| format!("there's no provider called {provider}"))?;
         let model = if model.trim().is_empty() { provider.model } else { model.trim() };
-        if model.is_empty() {
+        // A server on this Mac (no key) may take no model yet: `settle` picks one it has.
+        if model.is_empty() && provider.key.is_some() {
             bail!("choose a {} model for this bot in Edit voice", provider.name);
         }
         let (base, key) = match &self.offline {
@@ -438,8 +439,24 @@ impl Llm {
             if status == 400 && about_tools && body.as_object_mut().and_then(|b| b.remove("tools")).is_some() {
                 continue;
             }
+            if status == 404 && self.provider.id == "ollama" {
+                bail!(
+                    "{0} isn't pulled into Ollama yet. Run `ollama pull {0}` in Terminal, or pick a model you have in Settings › Bots",
+                    self.model
+                );
+            }
             bail!("{} {status}: {text}", self.provider.name);
         }
+    }
+
+    /// A server on this Mac has no model everyone has, so a bot that names none thinks with
+    /// the first chat model the server has.
+    pub async fn settle(mut self) -> Result<Self> {
+        if self.model.is_empty() {
+            let how = if self.provider.id == "ollama" { "pull one in Terminal, like `ollama pull gemma4:e4b-it-qat`" } else { "load one in it first" };
+            self.model = self.models().await?.into_iter().next().with_context(|| format!("{} has no chat model yet: {how}", self.provider.name))?;
+        }
+        Ok(self)
     }
 
     /// The models this provider offers right now.
@@ -881,7 +898,10 @@ mod tests {
         }
         assert_eq!(find("OpenAI").unwrap().wire, Responses);
         assert!(find("nobody").is_none());
-        assert!(Brains::offline().llm("lmstudio", "").is_err()); // no default model to fall back on
+        // A server on this Mac takes no model yet: the reply settles on one the server has.
+        assert_eq!(Brains::offline().llm("lmstudio", "").unwrap().model, "");
+        assert_eq!(Brains::offline().llm("ollama", "").unwrap().model, "");
+        assert!(Brains::offline().llm("custom", "").is_err()); // a server elsewhere needs its model named
         assert_eq!(Brains::offline().llm("lmstudio", "qwen3").unwrap().model, "qwen3");
     }
 

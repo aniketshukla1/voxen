@@ -677,7 +677,7 @@ struct Job {
 /// Streams a bot's reply from Claude, showing it as it arrives and, when `speak` is on,
 /// saying it sentence by sentence. Runs the bot's tools until it has its answer.
 async fn reply(shared: Arc<Shared>, job: Job) -> Result<()> {
-    let llm = shared.brains.llm(&job.bot.provider, &job.bot.model)?;
+    let llm = shared.brains.llm(&job.bot.provider, &job.bot.model)?.settle().await?;
     let functions = tools::functions(shared.xai.is_some(), llm.provider.id == "xai");
     let mut convo = llm.start(&job.content);
     let mouth = job
@@ -1184,5 +1184,26 @@ bots = ["Maya", "Sam"]
             "{got:#?}"
         );
         assert!(got.iter().any(|u| matches!(u, Update::Text { .. })), "{got:#?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Ollama running with a chat model (ollama pull gemma4:e4b-it-qat)"]
+    async fn live_bot_on_this_mac_needs_no_model_named() {
+        // Picking Ollama for a bot saves no model; Voxen uses a chat model Ollama has.
+        let local = TEAM.replacen("voice = \"v1\"", "voice = \"v1\"\nprovider = \"ollama\"", 1);
+        let got = live_turn_with(&local, "Say hello in five words.").await;
+        assert!(!got.iter().any(|u| matches!(u, Update::Problem { .. })), "{got:#?}");
+        assert!(got.iter().any(|u| matches!(u, Update::Text { .. })), "{got:#?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Ollama running"]
+    async fn live_missing_model_on_this_mac_says_how_to_get_it() {
+        let local = TEAM.replacen("voice = \"v1\"", "voice = \"v1\"\nprovider = \"ollama\"\nmodel = \"no-such-model\"", 1);
+        let got = live_turn_with(&local, "Hello?").await;
+        assert!(
+            got.iter().any(|u| matches!(u, Update::Problem { text } if text.contains("ollama pull no-such-model"))),
+            "{got:#?}"
+        );
     }
 }

@@ -35,6 +35,10 @@ What changed in each Voxen release, newest first.
 
 - A key you replace in Settings now takes effect after Save and restart. Before, Voxen kept
   using the old one until you quit it.
+- Bots on Ollama work. Voxen assumed `llama3.2`, so a bot set to Ollama failed unless you had
+  that model. Now it uses a chat model you've pulled, and Connections lists them. A model that
+  isn't pulled says how to get it. The bot dialog stays open with the reason when a change
+  can't be saved, where before it closed as if the change had worked.
 
 ## [0.1.0] - 2026-11-10
 

@@ -64,6 +64,7 @@ let voiceOn = false;
 let tray = []; // files waiting to go with your next turn
 let providers = []; // every provider a bot can think with, and whether its key is in
 let editing = null; // the bot being changed in the voice dialog, or null for a new one
+let savingBot = null; // the voice dialog's save, until the conversations confirm or refuse it
 let pendingOpen = null; // a room to open once its new voice or room shows up
 let hearing = null; // what you're saying, before your turn ends
 let demo = []; // timers of a running demo
@@ -836,6 +837,7 @@ function onUpdate(u) {
   const here = room === open;
   switch (u.kind) {
     case "team": {
+      if (savingBot) $("bot-dialog").close(); // the change took
       const mainBefore = team.main;
       team = { main: u.main, bots: u.bots, groups: u.groups };
       renderRail();
@@ -942,6 +944,14 @@ function onUpdate(u) {
       refreshSettings();
       break;
     case "problem":
+      if (savingBot) {
+        // The voice dialog's change was refused: say why there, where it can be fixed.
+        $("bot-error").textContent = u.text;
+        $("bot-save").textContent = savingBot.label;
+        savingBot = null;
+        pendingOpen = null;
+        break;
+      }
       note(room, u.text);
       if (inSettings()) $("settings-note").textContent = u.text;
       break;
@@ -1262,6 +1272,9 @@ async function loadModels(model) {
     if (asked !== modelsAsked || !names?.length) return;
     fill(names);
     if (!field.value) field.value = names[0];
+    else if (p.id === "ollama" && !names.includes(field.value)) {
+      $("brain-note").textContent = `${field.value} isn't on this Mac yet. Pick one you have, or pull it in Terminal: ollama pull ${field.value}`;
+    }
   } catch {
     // the list couldn't load; typing a model's name still works
   }
@@ -1395,15 +1408,21 @@ $("bot-form").addEventListener("submit", async (e) => {
     $("bot-error").textContent = error;
     return;
   }
+  const label = $("bot-save").textContent;
+  $("bot-save").textContent = "Saving…";
   try {
     await call.invoke(editing ? "update_bot" : "add_bot", { bot: newBot });
   } catch (err) {
     $("bot-error").textContent = String(err);
+    $("bot-save").textContent = label;
     return;
   }
   if (!editing) pendingOpen = `bot:${newBot.name}`;
-  $("bot-dialog").close();
+  // The conversations make the change: the dialog closes when the new team arrives, and stays
+  // open saying why if the change is refused.
+  savingBot = { label };
 });
+$("bot-dialog").addEventListener("close", () => (savingBot = null));
 
 // New room
 
@@ -1700,14 +1719,20 @@ function localVoicesConn() {
   return connRow({ keyNames: [], logo: "ollama", name: "Ollama voices", sub, state: ok ? "ok" : "off", stateText: ok ? "On this Mac" : "Not pulled yet", site: ok ? "" : "ollama.com/library/phonon", fields: [] });
 }
 
-function brainConn(p) {
+// What a provider runs and who thinks with it; a server on this Mac lists the models it has.
+function brainSub(p) {
   const users = usersOf(p);
-  const sub = [
-    p.key ? p.model : "Runs models on this Mac",
+  const has = checked[p.id]?.models;
+  return [
+    p.key ? p.model : has?.length ? has.slice(0, 3).join(", ") : "Runs models on this Mac",
     p.web && "web search",
     p.id === "xai" && "X search and pictures",
     users.length && `${and(users)} ${users.length > 1 ? "think" : "thinks"} with it`,
   ].filter(Boolean).join(" · ");
+}
+
+function brainConn(p) {
+  const sub = brainSub(p);
   const { state, text } = brainState(p);
   const custom = p.id === "custom";
   const fields = !p.key ? [] : custom ? [["CUSTOM_BASE_URL", "Its address, like https://your-server/v1", "url"], [p.key, "Its key, if it needs one"]] : [[p.key, `Paste your ${p.name} key`]];
@@ -1723,6 +1748,8 @@ function showState(p) {
   row.dataset.state = state;
   row.querySelector(".conn-state span").textContent = text;
   row.querySelector(".conn-state").title = detail || "";
+  row.querySelector(".set-text small").textContent = brainSub(p) || "Any server that speaks the OpenAI API";
+  if (!p.key && state === "ok") row.querySelector(".set-actions").replaceChildren(); // it's here: nothing to get
 }
 
 // Asks each connected provider, and each one on your Mac, for its models once a session, so a
@@ -1733,7 +1760,7 @@ function checkProviders() {
     checked[p.id] = { state: p.key ? "ok" : "off", text: "Checking…" };
     showState(p);
     call.invoke("models", { provider: p.id }).then(
-      (names) => (checked[p.id] = { state: "ok", text: `${p.key ? "Connected" : "Running"} · ${names.length} model${names.length === 1 ? "" : "s"}` }),
+      (names) => (checked[p.id] = { state: "ok", text: `${p.key ? "Connected" : "Running"} · ${names.length} model${names.length === 1 ? "" : "s"}`, models: names }),
       (err) => (checked[p.id] = p.key ? { state: "bad", text: "Couldn't connect", detail: String(err) } : { state: "off", text: "Not running", detail: String(err) }),
     ).then(() => {
       showState(p);
